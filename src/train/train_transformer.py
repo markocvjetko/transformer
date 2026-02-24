@@ -2,7 +2,7 @@
 import os
 import torch
 
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.models.transformer import Transformer
 
@@ -13,31 +13,35 @@ from src.utils import paths
 
 from sacrebleu.metrics import BLEU
 
-def evaluate(model, dataset, dataloader):
-    ### TODO - this is just a simple dirty implementatiton that check the score on one batch.
+def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
+    # Fetch the underlying dataset from the dataloader
+    dataset = dataloader.dataset
+    bos_token = dataset.bos_token
 
-    for batch_idx, (input_seq, target_seq) in enumerate(dataloader_train):
-        
-        input_seq = input_seq.to(device)
-        target_seq = target_seq.to(device)
-        optimizer.zero_grad()
-        
-        decoder_input = target_seq[:, :-1]   # All but last token
-        target_labels = target_seq[:, 1:]    # All but first token (shifted)
-        
-        # Create padding masks (True where padding)
-        
-        # Single forward pass - model predicts all positions in parallel
-        outputs = transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
-        outputs = outputs.argmax(dim=-1)
+    batch_size = dataloader.batch_size if dataloader.batch_size is not None else 1
 
-        #print(outputs.shape)
-        decoded_targets = [dataset.tokenizer_tgt.decode(target) for target in target_seq]
-        decoded_outputs = [dataset.tokenizer_tgt.decode(output) for output in outputs]
-
-        bleu = BLEU()
+    # No teacher forcing, the model decoder always starts with the <BOS> token 
+    decoder_input = torch.full((batch_size, 1), bos_token, dtype=torch.long).to(device)
+    
+    targets = [] #expected to be a list of strings
+    candidates = [] #expected to be a list of strings
+    bleu = BLEU()
+    
+    with torch.no_grad():
+        for batch_idx, (input_seq, target_seq) in enumerate(dataloader):
+            input_seq = input_seq.to(device)
+            target_labels = target_seq[:, 1:]    # All but first token (shifted)
+  
+            # Single forward pass - model predicts all positions in parallel
+            outputs = model.translate(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
+    
+            decoded_targets = [dataset.tokenizer_tgt.decode(target) for target in target_labels]
+            decoded_outputs = [dataset.tokenizer_tgt.decode(output) for output in outputs]
+            
+            targets.extend([*decoded_targets])
+            candidates.extend([*decoded_outputs])
         print(bleu.corpus_score(decoded_outputs, [decoded_targets]))
-        return
+    return
 
 
 if __name__ == "__main__":
@@ -49,7 +53,7 @@ if __name__ == "__main__":
     N = 6
 
     n_epochs = 1000
-    batch_size = 512
+    batch_size = 1
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -76,21 +80,17 @@ if __name__ == "__main__":
     tokenizer_tgt = BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "multi30k/tokenizer_de.json")
 
     dataset_train = TranslationDataset(
-        hf_ds_train, 
+        hf_ds_train.select(range(1)), 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
         max_len=128,
         )
-
-#    dataset_train = Subset(dataset_train, range(128))
 
     dataset_val = TranslationDataset(
         hf_ds_val, 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
         max_len=128)
-
-    # dataset_val = Subset(dataset_val, range(32))
 
     # Minimal dataloader
     dataloader_train = DataLoader(
@@ -101,9 +101,10 @@ if __name__ == "__main__":
 
     dataloader_val = DataLoader(
         dataset_val, 
-        batch_size=1, 
+        batch_size=batch_size, 
         shuffle=False,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn, 
+        drop_last=True)
 
 
     criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
@@ -136,7 +137,7 @@ if __name__ == "__main__":
             #     #print softmaxed model outputs for the last batch
             #     #print("Softmaxed model outputs:", F.softmax(outputs, dim=-1))
         avg_loss = total_loss / len(dataloader_val)
-        #print(f"Epoch {epoch+1} Average Loss = {avg_loss:.4f}")
+        print(f"Epoch {epoch+1} Average Loss = {avg_loss:.4f}")
 
         # Take a single batch from the validation dataloader
         test_example = next(iter(dataloader_val))
@@ -170,4 +171,4 @@ if __name__ == "__main__":
         #print("model output argmax (predicted token ids):", predicted_tokens)
         #print("model output decoded:", tokenizer_tgt.decode(predicted_tokens))
 
-        evaluate(transformer, dataset_val, dataloader_val)
+        evaluate(transformer, dataloader_train, device)
