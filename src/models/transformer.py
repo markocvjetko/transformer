@@ -193,11 +193,15 @@ class Transformer(nn.Module):
         
     def forward(self, x, y):
         """
-        X is of shape B, text len
-        src_padding_mask: (B, src_len) - True where padding
-        tgt_padding_mask: (B, tgt_len) - True where padding
-        """
-
+        Args:
+            x: torch.tensor, shape (B, N, vocab_size)
+            y: torch.tensor, shape (B, M, vocab_size)
+            Where M, N are sequence lengths.
+        Return:
+            Tensor of shape (B, M, vocab_size)
+        # """
+        # print("in forward")
+        # print(x.shape, y.shape)
 
         src_padding_mask = (x == self.pad_token_id)
         tgt_padding_mask = (y == self.pad_token_id)
@@ -213,32 +217,54 @@ class Transformer(nn.Module):
         decoder_output = self.positional_embedding(y_embedding)
         for decoder in self.decoders:
             decoder_output = decoder(decoder_output, x, tgt_padding_mask, src_padding_mask)
-        #output = F.softmax(self.ff_output(decoder_output), dim=-1)
-            #output = torch.argmax(output, dim=-1)
-            #y = torch.cat([y, output], dim=-1)
+        # output = F.softmax(self.ff_output(decoder_output), dim=-1)
+        #     output = torch.argmax(output, dim=-1)
+        #     y = torch.cat([y, output], dim=-1)
 
         return self.ff_output(decoder_output)
     
 
     def translate(self, x, y):
-        
-        #HACK very unoptimized code. Encoder should run forward only once
-        #KV-cache for the rest. 
+        """
+        TODO - expects a tokenized sentence as encoder input and BOS token as decoder input
+        Args:
+            x: torch.tensor, shape (B, N, vocab_size)
+            y: torch.tensor, shape (B, M, vocab_size)
+            Where M, N are sequence lengths.
+        Return:
+            Tensor of shape B, seq_len?
+        """
+
+        #forward encoder
+        src_padding_mask = (x == self.pad_token_id)
+
+        #pass through embedding layer
+        x = self.embedding_layer_encoder(x) * math.sqrt(self.d_model)
+        x = self.positional_embedding(x)
+        for encoder in self.encoders:
+            x = encoder(x, src_padding_mask=src_padding_mask)    
 
         while y.shape[1] < self.seq_len:
-            y_out = self.forward(x, y)
-            y_out = F.softmax(y_out, dim=-1)
-            y_out = torch.argmax(y_out, dim=-1)
-            y = torch.cat([y, y_out[:, -1:]], dim=1)
+            #print(y.shape)
+            tgt_padding_mask = (y == self.pad_token_id)
+            y_embedding = self.embedding_layer_decoder(y) * math.sqrt(self.d_model)
+            decoder_output = self.positional_embedding(y_embedding)
+            for decoder in self.decoders:
+                decoder_output = decoder(decoder_output, x, tgt_padding_mask, src_padding_mask)
+            
+            output = self.ff_output(decoder_output)
+            #print("out before argmax", output.shape)
+            output = torch.argmax(output, dim=-1, keepdim=True)
+            #print(output.shape, output[:, -1].shape)
+            y = torch.cat((y, output[:, -1]), dim=-1)
+
+
         return y
         
 
 
 if __name__ == "__main__":
 
-    import torch
-
-    # Create a Transformer instance
     transformer = Transformer(
         vocab_size=512,
         seq_len=64,
@@ -251,12 +277,9 @@ if __name__ == "__main__":
     batch_size = 8
     seq_len = 64
 
-    # Generate a random batch of input and output token sequences
     x = torch.randint(low=0, high=512, size=(batch_size, seq_len))
-    # For decoder input, we can start with a single start token (e.g., 0) and pad to (batch_size, 1)
     y = torch.zeros(batch_size, 1, dtype=torch.long)
 
-    # Pass the batch through the transformer
     output = transformer(x, y)
 
     print("Output shape:", output.shape)

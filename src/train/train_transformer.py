@@ -11,6 +11,7 @@ from datasets import load_dataset
 from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
+from tqdm import tqdm
 from sacrebleu.metrics import BLEU
 
 def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
@@ -28,7 +29,7 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
     bleu = BLEU()
     
     with torch.no_grad():
-        for batch_idx, (input_seq, target_seq) in enumerate(dataloader):
+        for batch_idx, (input_seq, target_seq) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             input_seq = input_seq.to(device)
             target_labels = target_seq[:, 1:]    # All but first token (shifted)
   
@@ -37,23 +38,23 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
     
             decoded_targets = [dataset.tokenizer_tgt.decode(target) for target in target_labels]
             decoded_outputs = [dataset.tokenizer_tgt.decode(output) for output in outputs]
-            
             targets.extend([*decoded_targets])
             candidates.extend([*decoded_outputs])
-        print(bleu.corpus_score(decoded_outputs, [decoded_targets]))
+        print(candidates[0])    #HACK This is just a debug print
+        print(bleu.corpus_score(candidates, [targets]))
     return
 
 
 if __name__ == "__main__":
     vocab_size = 500 
     seq_len = 128
-    d_model = 128
-    d_ff = 128
+    d_model = 512
+    d_ff = 2048
     n_heads = 8
     N = 6
 
     n_epochs = 1000
-    batch_size = 1
+    batch_size = 128
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -80,7 +81,7 @@ if __name__ == "__main__":
     tokenizer_tgt = BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "multi30k/tokenizer_de.json")
 
     dataset_train = TranslationDataset(
-        hf_ds_train.select(range(1)), 
+        hf_ds_train.select(range(2048)), 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
         max_len=128,
@@ -139,36 +140,7 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(dataloader_val)
         print(f"Epoch {epoch+1} Average Loss = {avg_loss:.4f}")
 
-        # Take a single batch from the validation dataloader
-        test_example = next(iter(dataloader_val))
-
-        # Print length of source and target sentences in token space
-        src_len = (test_example[0][0] != 0).sum().item()
-        tgt_len = (test_example[1][0] != 0).sum().item()
-        # print(f"Source sentence token length: {src_len}")
-        # print(f"Target sentence token length: {tgt_len}")
-
-        #print(tokenizer_src.decode(test_example[0][0], add_special=True))
-        #print(tokenizer_tgt.decode(test_example[1][0], add_special=True))
-        # Run the transformer on this batch (src->tgt), simulating inference
-        # For simplicity, here, just pass src as both args
-        decoder_input = test_example[1][:, :-1].to(device)
-        src_input = test_example[0].to(device)
-        src_padding_mask = (src_input == 0)
-        tgt_padding_mask = (decoder_input == 0)
-        test_output = transformer(src_input, decoder_input)
-
-        # Take argmax to get predicted token IDs (greedy decoding for demonstration)
-        predicted_ids = test_output.argmax(dim=-1)
-        # For batch_size=1, get the first batch example
-        predicted_tokens = predicted_ids[0]
-
-
         torch.save(transformer.state_dict(), paths.EXPERIMENTS_DIR / "multi30k/latest.pth")
         
-
-        #print(test_output)
-        #print("model output argmax (predicted token ids):", predicted_tokens)
-        #print("model output decoded:", tokenizer_tgt.decode(predicted_tokens))
-
-        evaluate(transformer, dataloader_train, device)
+        if epoch % 50 == 0:
+            evaluate(transformer, dataloader_train, device)
