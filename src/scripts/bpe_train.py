@@ -6,18 +6,21 @@ Trains the tokenizers for translation. Each language has its own tokenizer.
 from src.tokenizers.BPE import BytePairEncoding
 from datasets import load_dataset
 from pathlib import Path 
+from src.utils import paths
+
 CONFIG = {
     "tokenizer": {
         "vocab_size":500,
         "min_frequency":100
     },
-    "save_path": "./experiments/multi30k/"
+    "save_path": paths.EXPERIMENTS_DIR / "multi30k",
+    "dataset_dir": paths.DATA_DIR / "multi30k"
 }
 
 
 def main():
 
-    ds = load_dataset("bentrevett/multi30k")#, data_dir="data/multi30k_de_en")
+    ds = load_dataset("bentrevett/multi30k", split="train", cache_dir=CONFIG.data_dir)#, data_dir="data/multi30k_de_en")
     train_ds = ds["train"]
 
     tokenizer_en = BytePairEncoding(**CONFIG["tokenizer"])

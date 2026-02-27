@@ -56,6 +56,8 @@ if __name__ == "__main__":
     n_epochs = 1000
     batch_size = 128
 
+    data_dir = paths.DATA_DIR / "multi30k"
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     transformer = Transformer(
