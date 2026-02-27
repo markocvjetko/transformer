@@ -13,4 +13,4 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 DATA_DIR = Path(os.environ.get("TRANSFORMER_DATA_DIR", ROOT / "data"))
-EXPERIMENTS_DIR = Path(os.environ.get("TRANSFORMER_EXPERIMENTS_DIR", ROOT / "data"))
+EXPERIMENTS_DIR = Path(os.environ.get("TRANSFORMER_EXPERIMENTS_DIR", ROOT / "experiments"))

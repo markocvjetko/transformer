@@ -36,10 +36,11 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
             # Single forward pass - model predicts all positions in parallel
             outputs = model.translate(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
     
-            decoded_targets = [dataset.tokenizer_tgt.decode(target) for target in target_labels]
+            decoded_targets = [dataset.tokenizer_tgt.decode(target) for target in target_seq]
             decoded_outputs = [dataset.tokenizer_tgt.decode(output) for output in outputs]
             targets.extend([*decoded_targets])
             candidates.extend([*decoded_outputs])
+        print(targets[0])
         print(candidates[0])    #HACK This is just a debug print
         print(bleu.corpus_score(candidates, [targets]))
     return
@@ -48,13 +49,15 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
 if __name__ == "__main__":
     vocab_size = 500 
     seq_len = 128
-    d_model = 512
-    d_ff = 2048
-    n_heads = 8
-    N = 6
+    d_model = 128
+    d_ff = 256
+    n_heads = 4
+    N = 3
 
-    n_epochs = 1000
-    batch_size = 128
+    lr = 3e-4
+    n_epochs = 200
+    eval_freq = 10
+    batch_size = 256
 
     data_dir = paths.DATA_DIR / "multi30k"
 
@@ -83,7 +86,7 @@ if __name__ == "__main__":
     tokenizer_tgt = BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "multi30k/tokenizer_de.json")
 
     dataset_train = TranslationDataset(
-        hf_ds_train.select(range(2048)), 
+        hf_ds_train,#.select(range(batch_size)), 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
         max_len=128,
@@ -111,7 +114,7 @@ if __name__ == "__main__":
 
 
     criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-    optimizer = torch.optim.Adam(transformer.parameters(), lr=3e-4)
+    optimizer = torch.optim.Adam(transformer.parameters(), lr=lr)
 
     # Minimal training loop
     for epoch in range(n_epochs):
@@ -139,10 +142,10 @@ if __name__ == "__main__":
             #     print(f"  Batch {batch_idx+1}/{len(dataloader)}: Batch Loss = {loss.item():.4f}")
             #     #print softmaxed model outputs for the last batch
             #     #print("Softmaxed model outputs:", F.softmax(outputs, dim=-1))
-        avg_loss = total_loss / len(dataloader_val)
+        avg_loss = total_loss / len(dataset_val)
         print(f"Epoch {epoch+1} Average Loss = {avg_loss:.4f}")
 
         torch.save(transformer.state_dict(), paths.EXPERIMENTS_DIR / "multi30k/latest.pth")
         
-        if epoch % 50 == 0:
-            evaluate(transformer, dataloader_train, device)
+        if epoch != 0 and epoch % eval_freq == 0:
+            evaluate(transformer, dataloader_val, device)
