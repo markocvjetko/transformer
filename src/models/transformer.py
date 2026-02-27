@@ -1,3 +1,4 @@
+from unittest import removeHandler
 import torch
 import math
 import torch.nn.functional as F
@@ -107,7 +108,7 @@ class MultiHeadAttention(nn.Module):
 
 class EncoderBlock(nn.Module):
 
-    def __init__(self, d_model=512, d_ff=2048, n_heads=8): 
+    def __init__(self, d_model=512, d_ff=2048, n_heads=8, p_dropout=0.1): 
         super().__init__()
 
         self.mha = MultiHeadAttention(d_model, n_heads, d_model, d_model, d_model, d_model, False)
@@ -116,18 +117,19 @@ class EncoderBlock(nn.Module):
                                 nn.Linear(d_model, d_ff),
                                 nn.ReLU(),
                                 nn.Linear(d_ff, d_model)) #applied to each token individually
+        self.dropout = nn.Dropout(p=p_dropout)
         self.ln_ff = nn.LayerNorm(d_model)
 
     def forward(self, x, src_padding_mask=None):
-        x = self.ln_mha(self.mha(x, x, x, key_padding_mask=src_padding_mask) + x) #shape is B, text_len, d_model
-        x = self.ln_ff(self.ff(x) + x)
+        x = self.ln_mha(self.dropout(self.mha(x, x, x, key_padding_mask=src_padding_mask)) + x) #shape is B, text_len, d_model
+        x = self.ln_ff(x + self.dropout(self.ff(x)))
         return x
 
 
 
 class DecoderBlock(nn.Module):
     
-    def __init__(self, d_model, d_ff, n_heads):
+    def __init__(self, d_model, d_ff, n_heads, p_dropout=0.1):
         super().__init__()
         self.d_model = d_model
         self.d_ff = d_ff
@@ -141,12 +143,14 @@ class DecoderBlock(nn.Module):
                     nn.Linear(d_model, d_ff),
                     nn.ReLU(),
                     nn.Linear(d_ff, d_model)) #applied to each token individually
+        self.dropout = nn.Dropout(p=p_dropout)
         self.ln_ff = nn.LayerNorm(d_model)
 
+
     def forward(self, x, encoder_output, tgt_padding_mask=None, memory_padding_mask=None):
-        x = self.ln_mha_1(self.mha_1(x, x, x, key_padding_mask=tgt_padding_mask) + x)
-        x = self.ln_mha_2(self.mha_2(x, encoder_output, encoder_output, key_padding_mask=memory_padding_mask) + x)
-        x = self.ln_ff(self.ff(x) + x)
+        x = self.ln_mha_1(self.dropout(self.mha_1(x, x, x, key_padding_mask=tgt_padding_mask)) + x)
+        x = self.ln_mha_2(self.dropout(self.mha_2(x, encoder_output, encoder_output, key_padding_mask=memory_padding_mask)) + x)
+        x = self.ln_ff(x + self.dropout(self.ff(x)))
         return x
 
 class Transformer(nn.Module):
@@ -168,7 +172,9 @@ class Transformer(nn.Module):
         d_ff=2048,
         n_heads=8,
         N=6,
-        pad_token_id=0
+        pad_token_id=0,
+        eos_token_id=2,
+        p_dropout=0.1
         ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -178,10 +184,13 @@ class Transformer(nn.Module):
         self.n_heads = n_heads
         self.N = N
         self.pad_token_id = pad_token_id
+        self.eos_token_id = eos_token_id
+        self.p_dropout = p_dropout
 
         self.embedding_layer_encoder = EmbeddingLayer(vocab_size, d_model)
         self.embedding_layer_decoder = EmbeddingLayer(vocab_size, d_model)
         self.positional_embedding = PositionalEmbedding(seq_len, d_model)  # buffer auto-moves with .to(device)
+        self.dropout = nn.Dropout(p_dropout)
         self.encoders = nn.ModuleList([EncoderBlock(d_model, d_ff, n_heads) for _ in range(N)])
         self.decoders = nn.ModuleList([DecoderBlock(d_model, d_ff, n_heads) for _ in range(N)])
         self.ff_output = nn.Linear(d_model, vocab_size)
@@ -209,12 +218,15 @@ class Transformer(nn.Module):
         #pass through embedding layer
         x = self.embedding_layer_encoder(x) * math.sqrt(self.d_model)
         x = self.positional_embedding(x)
+        x = self.dropout(x)
+
         for encoder in self.encoders:
             x = encoder(x, src_padding_mask=src_padding_mask)    
 
         # while not y.shape[-1] >= self.seq_len:
         y_embedding = self.embedding_layer_decoder(y) * math.sqrt(self.d_model)
         decoder_output = self.positional_embedding(y_embedding)
+        decoder_output = self.dropout(decoder_output)
         for decoder in self.decoders:
             decoder_output = decoder(decoder_output, x, tgt_padding_mask, src_padding_mask)
         # output = F.softmax(self.ff_output(decoder_output), dim=-1)
@@ -241,24 +253,43 @@ class Transformer(nn.Module):
         #pass through embedding layer
         x = self.embedding_layer_encoder(x) * math.sqrt(self.d_model)
         x = self.positional_embedding(x)
+        x = self.dropout(x)
         for encoder in self.encoders:
             x = encoder(x, src_padding_mask=src_padding_mask)    
 
-        while y.shape[1] < self.seq_len:
-            #print(y.shape)
+        #tracks uncompleted sentences
+        remaining = list(range(x.size(0)))
+
+        while remaining and y.shape[1] < self.seq_len:
+            
             tgt_padding_mask = (y == self.pad_token_id)
             y_embedding = self.embedding_layer_decoder(y) * math.sqrt(self.d_model)
             decoder_output = self.positional_embedding(y_embedding)
-            for decoder in self.decoders:
-                decoder_output = decoder(decoder_output, x, tgt_padding_mask, src_padding_mask)
+            decoder_output = self.dropout(decoder_output)
             
-            output = self.ff_output(decoder_output)
-            #print("out before argmax", output.shape)
-            output = torch.argmax(output, dim=-1, keepdim=True)
-            #print(output.shape, output[:, -1].shape)
-            y = torch.cat((y, output[:, -1]), dim=-1)
+            # Select current part of decoder_output based on remaining_sentences
+            decoder_output = decoder_output[remaining]
+            
+            for decoder in self.decoders:
+                decoder_output = decoder(
+                    decoder_output,
+                    current_x = x[remaining],
+                    current_tgt_padding_mask = tgt_padding_mask[remaining],
+                    current_src_padding_mask = src_padding_mask[remaining])
 
+            next_token = self.ff_output(decoder_output[:, -1])
+            next_token = torch.argmax(next_token, dim=-1, keepdim=True)[:, -1]
+            
+            token_column = torch.full((y.shape[0], 1), self.pad_token_id, dtype=torch.long, device=y.device)
+            token_column[remaining] = next_token
+            next_token = token_column 
+            y = torch.cat((y, next_token), dim=-1)
 
+            #update incomplete sentences tracker
+            eos_mask = (next_token.squeeze(-1) == self.eos_token_id)
+            remaining = [idx for idx, is_eos in zip(remaining, eos_mask) if not is_eos]
+
+            
         return y
         
 
