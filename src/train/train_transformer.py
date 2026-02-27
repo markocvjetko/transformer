@@ -29,9 +29,8 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
     bleu = BLEU()
     
     with torch.no_grad():
-        for batch_idx, (input_seq, target_seq) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
+        for input_seq, target_seq in tqdm(dataloader, desc="Evaluating", unit="batch"):
             input_seq = input_seq.to(device)
-            target_labels = target_seq[:, 1:]    # All but first token (shifted)
   
             # Single forward pass - model predicts all positions in parallel
             outputs = model.translate(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
@@ -40,9 +39,13 @@ def evaluate(model: Transformer, dataloader: DataLoader, device: torch.device):
             decoded_outputs = [dataset.tokenizer_tgt.decode(output) for output in outputs]
             targets.extend([*decoded_targets])
             candidates.extend([*decoded_outputs])
-        print(targets[0])
-        print(candidates[0])    #HACK This is just a debug print
+        
         print(bleu.corpus_score(candidates, [targets]))
+
+        #HACK These is just a debug print, to see what the model produces
+        print(targets[0])
+        print(candidates[0]) 
+        
     return
 
 
@@ -53,14 +56,14 @@ if __name__ == "__main__":
     d_ff = 256
     n_heads = 4
     N = 3
-
     lr = 3e-4
+
     n_epochs = 200
     eval_freq = 10
     batch_size = 256
 
     data_dir = paths.DATA_DIR / "multi30k"
-
+    experiment_dir = paths.EXPERIMENTS_DIR / "multi30k"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     transformer = Transformer(
@@ -76,14 +79,13 @@ if __name__ == "__main__":
     print(f"Number of parameters: {sum(p.numel() for p in transformer.parameters())}")
 
     # Load from cached local files if they exist, else download and save to data/multi30k
-    data_dir = "data/multi30k"
     hf_dataset = load_dataset("bentrevett/multi30k", cache_dir=data_dir)
 
     hf_ds_train = hf_dataset["train"]
     hf_ds_val = hf_dataset["validation"]
 
-    tokenizer_src = BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "multi30k/tokenizer_en.json")
-    tokenizer_tgt = BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "multi30k/tokenizer_de.json")
+    tokenizer_src = BytePairEncoding.from_file(experiment_dir / "tokenizer_en.json")
+    tokenizer_tgt = BytePairEncoding.from_file(experiment_dir / "tokenizer_de.json")
 
     dataset_train = TranslationDataset(
         hf_ds_train,#.select(range(batch_size)), 
@@ -145,7 +147,7 @@ if __name__ == "__main__":
         avg_loss = total_loss / len(dataset_val)
         print(f"Epoch {epoch+1} Average Loss = {avg_loss:.4f}")
 
-        torch.save(transformer.state_dict(), paths.EXPERIMENTS_DIR / "multi30k/latest.pth")
+        torch.save(transformer.state_dict(), experiment_dir / "latest.pth")
         
-        if epoch != 0 and epoch % eval_freq == 0:
+        if epoch % eval_freq == 0:
             evaluate(transformer, dataloader_val, device)

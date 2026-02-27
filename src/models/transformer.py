@@ -257,7 +257,7 @@ class Transformer(nn.Module):
         for encoder in self.encoders:
             x = encoder(x, src_padding_mask=src_padding_mask)    
 
-        #tracks uncompleted sentences
+        #tracks uncompleted sequences (those without <EOS> token)
         remaining = list(range(x.size(0)))
 
         while remaining and y.shape[1] < self.seq_len:
@@ -273,19 +273,19 @@ class Transformer(nn.Module):
             for decoder in self.decoders:
                 decoder_output = decoder(
                     decoder_output,
-                    current_x = x[remaining],
-                    current_tgt_padding_mask = tgt_padding_mask[remaining],
-                    current_src_padding_mask = src_padding_mask[remaining])
+                    x[remaining],
+                    tgt_padding_mask[remaining],
+                    src_padding_mask[remaining])
 
             next_token = self.ff_output(decoder_output[:, -1])
-            next_token = torch.argmax(next_token, dim=-1, keepdim=True)[:, -1]
+            next_token = torch.argmax(next_token, dim=-1, keepdim=True)
             
             token_column = torch.full((y.shape[0], 1), self.pad_token_id, dtype=torch.long, device=y.device)
             token_column[remaining] = next_token
             next_token = token_column 
             y = torch.cat((y, next_token), dim=-1)
 
-            #update incomplete sentences tracker
+            #update incomplete sequence tracker
             eos_mask = (next_token.squeeze(-1) == self.eos_token_id)
             remaining = [idx for idx, is_eos in zip(remaining, eos_mask) if not is_eos]
 
