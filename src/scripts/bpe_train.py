@@ -20,11 +20,10 @@ CONFIG = {
 
 def main():
 
-    ds = load_dataset("bentrevett/multi30k", split="train", cache_dir=CONFIG["dataset_dir"])#, data_dir="data/multi30k_de_en")
-    train_ds = ds["train"]
+    dataset = load_dataset("bentrevett/multi30k", split="train", cache_dir=CONFIG["dataset_dir"])#, data_dir="data/multi30k_de_en")
 
     tokenizer_en = BytePairEncoding(**CONFIG["tokenizer"])
-    text_en = " ".join([example["en"] for example in train_ds])
+    text_en = " ".join([example["en"] for example in dataset])
     print("Number of EN chars:", len(text_en))
     tokenizer_en.fit(text_en)
     tokenizer_en.save(Path(CONFIG["save_path"], "tokenizer_en.json"))
@@ -34,7 +33,7 @@ def main():
         print(f"{idx}: {repr(token)}")
 
     tokenizer_fr = BytePairEncoding(**CONFIG["tokenizer"])
-    text_de = " ".join([example["de"] for example in train_ds])
+    text_de = " ".join([example["de"] for example in dataset])
     print("Number of DE chars:", len(text_de))
     tokenizer_fr.fit(text_de)
     tokenizer_fr.save(Path(CONFIG["save_path"], "tokenizer_de.json"))
