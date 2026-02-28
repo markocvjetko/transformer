@@ -20,7 +20,7 @@ CONFIG = {
 
 def main():
 
-    ds = load_dataset("bentrevett/multi30k", split="train", cache_dir=CONFIG.data_dir)#, data_dir="data/multi30k_de_en")
+    ds = load_dataset("bentrevett/multi30k", split="train", cache_dir=CONFIG.dataset_dir)#, data_dir="data/multi30k_de_en")
     train_ds = ds["train"]
 
     tokenizer_en = BytePairEncoding(**CONFIG["tokenizer"])
