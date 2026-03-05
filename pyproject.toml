@@ -12,7 +12,8 @@ dependencies = [
     "datasets",
     "tqdm",
     "sacrebleu",
-    "matplotlib"
+    "matplotlib",
+    "lightning"
 ]
 
 [build-system]
