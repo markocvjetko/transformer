@@ -13,7 +13,8 @@ dependencies = [
     "tqdm",
     "sacrebleu",
     "matplotlib",
-    "lightning"
+    "lightning",
+    "optuna"
 ]
 
 [build-system]

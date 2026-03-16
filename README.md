@@ -38,3 +38,14 @@ Added beam search toy implementation in beam_search_toy.ipynb
 - The implementation keeps finished beams inside the beam list, stops after all beams are finished
 - no per-batch optimization in the toy model (e.g. batch elements with all beams finished 
 are still fed to the transformer)
+
+
+
+13.03.2026.
+
+Considered a hyperparameter optim library
+- Optuna previously used, seems to work well
+- Ray Tune - seems too heavy for what I need. It seeems to be a hparam optim for very large scale experiments. 
+For the purposes of this codebase, Optuna syncing via a journal.log file works well across different HPC (jean zay) nodes.
+
+Refactored lightning training config managment
