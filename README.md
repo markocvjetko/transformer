@@ -49,3 +49,5 @@ Considered a hyperparameter optim library
 For the purposes of this codebase, Optuna syncing via a journal.log file works well across different HPC (jean zay) nodes.
 
 Refactored lightning training config managment
+
+Todays commits should have been on main, not beam_search branch
