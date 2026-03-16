@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from datasets import load_dataset
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
@@ -9,6 +11,30 @@ from src.models.transformer import Transformer
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
+
+
+
+@dataclass
+class Args:
+    experiment_name: str = "multi30k"
+    dataset_root: str = "bentrevett/multi30k"
+    tokenizer_src: str = "tokenizer_en.json"
+    tokenizer_tgt: str = "tokenizer_de.json"
+    vocab_size: int = 500
+    seq_len: int = 128
+    d_model: int = 128
+    d_ff: int = 256
+    n_heads: int = 4
+    N: int = 3
+    p_dropout: float = 0.1
+    lr: float = 3e-4
+    batch_size: int = 256
+    n_epochs: int = 200
+    eval_freq: int = 10
+    max_epochs: int = 200
+    num_workers: int = 16
+    early_stopping_patience: 10
+
 
 class LitTransformer(L.LightningModule):
     def __init__(self, transformer):
@@ -28,8 +54,8 @@ class LitTransformer(L.LightningModule):
 
             #loss = criterion(outputs.view(-1, vocab_size), target_labels.reshape(-1))
             
-        loss = nn.functional.cross_entropy(outputs.view(-1, vocab_size), target_labels.reshape(-1))
-        # Logging to TensorBoard (if installed) by default
+        loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
+        # Logging to TensorBoard (if installed) by defaultexperiment_name
         self.log("train_loss", loss, on_step=False, on_epoch=True)
         return loss
     
@@ -43,7 +69,7 @@ class LitTransformer(L.LightningModule):
         
         outputs = self.transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
         print(outputs.shape)
-        loss = nn.functional.cross_entropy(outputs.view(-1, vocab_size), target_labels.reshape(-1))
+        loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
         # Logging to TensorBoard (if installed) by default
         self.log("val_loss", loss, on_step=False, on_epoch=True)
         return loss
@@ -66,20 +92,12 @@ class LitTransformer(L.LightningModule):
 
 if __name__ == "__main__":
 
-    experiment_name = "multi30k"
-    experiment_root = paths.EXPERIMENTS_DIR / experiment_name
 
-    vocab_size = 500 
-    seq_len = 128
-    d_model = 128
-    d_ff = 256
-    n_heads = 4
-    N = 3
-    lr = 3e-4
+    args = Args()
 
-    n_epochs = 200
-    eval_freq = 10
-    batch_size = 256
+    print(args.experiment_name)
+    experiment_root = paths.EXPERIMENTS_DIR / args.experiment_name
+
 
     # Load from cached local files if they exist, else download and save to data/multi30k
     hf_dataset = load_dataset("bentrevett/multi30k", cache_dir=paths.DATA_DIR)
@@ -87,58 +105,59 @@ if __name__ == "__main__":
     hf_ds_train = hf_dataset["train"]
     hf_ds_val = hf_dataset["validation"]
 
-    tokenizer_src = BytePairEncoding.from_file(experiment_root / "tokenizer_en.json")
-    tokenizer_tgt = BytePairEncoding.from_file(experiment_root / "tokenizer_de.json")
+    tokenizer_src = BytePairEncoding.from_file(experiment_root / args.tokenizer_src)
+    tokenizer_tgt = BytePairEncoding.from_file(experiment_root / args.tokenizer_tgt)
 
     dataset_train = TranslationDataset(
         hf_ds_train,#.select(range(batch_size)), 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
-        max_len=128,
+        max_len=args.seq_len,
         )
 
     dataset_val = TranslationDataset(
         hf_ds_val, 
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
-        max_len=128)
+        max_len=args.seq_len)
 
     # Minimal dataloader
     dataloader_train = DataLoader(
         dataset_train, 
-        batch_size=batch_size, 
+        batch_size=args.batch_size, 
         shuffle=True,
-        num_workers=16,
+        num_workers=args.num_workers,
         collate_fn=collate_fn)
 
     dataloader_val = DataLoader(
         dataset_val, 
-        batch_size=batch_size, 
+        batch_size=args.batch_size, 
         shuffle=False,
-        num_workers=16,
+        num_workers=args.num_workers,
         collate_fn=collate_fn, 
-        drop_last=True)
+        drop_last=False)
 
 
     model = Transformer(
-        vocab_size=500,
-        seq_len=128,
-        d_model=128,
-        d_ff=256,
-        n_heads=4,
-        N=3,
+        vocab_size=args.vocab_size,
+        seq_len=args.seq_len,
+        d_model=args.d_model,
+        d_ff=args.d_ff,
+        n_heads=args.n_heads,
+        N=args.N,
+        p_dropout=args.p_dropout,
         pad_token_id=0,
         eos_token_id=2,
-        p_dropout=0.1
     )
+
     lit_model = LitTransformer(model)
 
     trainer = L.Trainer(
-    max_epochs=200,
+    max_epochs=args.max_epochs,
     check_val_every_n_epoch=10,
     callbacks=[
         ModelCheckpoint(dirpath=experiment_root, save_last=True, ),
-        EarlyStopping(monitor="val_loss", mode="min")],
+        EarlyStopping(monitor="val_loss", mode="min", patience=args.early_stopping_patience)],
     logger=[CSVLogger(save_dir=experiment_root)],
     )
 
