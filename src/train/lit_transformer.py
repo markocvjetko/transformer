@@ -1,8 +1,11 @@
+import subprocess
+
+
 from dataclasses import dataclass
 
 from datasets import load_dataset
 import lightning as L
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from torch import optim, nn
 from torch.utils.data import DataLoader
@@ -12,6 +15,17 @@ from src.datasets.translation import TranslationDataset, collate_fn
 from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
+
+class GitCallback(Callback):
+
+    def __init__(self, experiment_root) -> None:
+        super().__init__()
+        self.experiment_root = experiment_root
+
+    def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        
+        with open(self.experiment_root / "git_hash", mode="w") as f:
+            f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
 
 
 @dataclass
@@ -33,7 +47,7 @@ class Args:
     eval_freq: int = 10
     max_epochs: int = 200
     num_workers: int = 16
-    early_stopping_patience: 10
+    early_stopping_patience: int = 10
 
 
 class LitTransformer(L.LightningModule):
@@ -155,10 +169,12 @@ if __name__ == "__main__":
     trainer = L.Trainer(
     max_epochs=args.max_epochs,
     check_val_every_n_epoch=10,
-    callbacks=[
+    callbacks=[        
+        GitCallback(experiment_root),
         ModelCheckpoint(dirpath=experiment_root, save_last=True, ),
         EarlyStopping(monitor="val_loss", mode="min", patience=args.early_stopping_patience)],
     logger=[CSVLogger(save_dir=experiment_root)],
+    
     )
 
     trainer.fit(lit_model, dataloader_train, dataloader_val)
