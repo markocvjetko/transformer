@@ -1,55 +1,65 @@
 """
 A simple hyperparameter sweep script with Optuna.
 """
-
+import os
+import subprocess
+from functools import partial
+from torch.utils.data import DataLoader
+from datasets import load_dataset
+import lightning as L
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import optuna
-import torch
+
+from src.datasets.translation import TranslationDataset, collate_fn
+from src.models.transformer import Transformer
+from src.tokenizers.BPE import BytePairEncoding
+from src.train.lit_transformer import LitTransformer
+from src.utils import paths
 
 
+def objective(trial: optuna.Trial, config):
+    #suggest params,
 
-if __name__ == "__main__":
+    vocab_size_exp =  trial.suggest_int("vocab_size_exp", 8, 15)
+    vocab_size = 2 ** vocab_size_exp
+    d_model_exp = trial.suggest_int("d_model_exp", 5, 8) 
+    d_model = 2 ** d_model_exp
+    d_ff_ratio = trial.suggest_int("d_ff_ration", 1, 4)
+    d_ff = d_model * d_ff_ratio
+
+    n_heads_exp = trial.suggest_int("n_heads", 1, 5)
+    n_heads = 2 ** n_heads_exp
+    N = trial.suggest_int("N", 1, 6)
+    lr = trial.suggest_float("lr", 10e-5, 10e-3)
+    batch_size_exp = trial.suggest_int("batch_size_exp", 6, 11)
+    batch_size = 2 ** batch_size_exp
+
+    dataset = load_dataset("bentrevett/multi30k", cache_dir=paths.DATA_DIR)
+    ds_train = dataset["train"]
+    ds_val = dataset["validation"]
+
+    text_en = " ".join([example["en"] for example in ds_train])
+    text_de = " ".join([example["de"] for example in ds_train])
+    text = " ".join([text_en, text_de])
+
+    #train tokenizer
+    tokenizer = BytePairEncoding(vocab_size)
+    tokenizer.fit(text)
+    tokenizer.save(config["sweep_root"] / str(trial.number) / "tokenizer.json")
     
-    experiment_name = "multi30k"
-    experiment_root = paths.EXPERIMENTS_DIR / experiment_name
-
-    #fixed params
-    seq_len = 128
-    n_epochs = 200
-
-    eval_freq = 10
-
-    #optim params
-    d_model = 128
-    d_ff = d_model * 4
-    vocab_size = 500
-    n_heads = 4
-    N = 3
-
-    lr = 3e-4
-    batch_size = 256
-
-
-    # Load from cached local files if they exist, else download and save to data/multi30k
-    hf_dataset = load_dataset("bentrevett/multi30k", cache_dir=paths.DATA_DIR)
-
-    hf_ds_train = hf_dataset["train"]
-    hf_ds_val = hf_dataset["validation"]
-
-    tokenizer_src = BytePairEncoding.from_file(experiment_root / "tokenizer_en.json")
-    tokenizer_tgt = BytePairEncoding.from_file(experiment_root / "tokenizer_de.json")
-
     dataset_train = TranslationDataset(
-        hf_ds_train,#.select(range(batch_size)), 
-        tokenizer_src=tokenizer_src,
-        tokenizer_tgt=tokenizer_tgt,
-        max_len=128,
+        ds_train,#.select(range(batch_size)), 
+        tokenizer_src=tokenizer,
+        tokenizer_tgt=tokenizer,
+        max_len=config["seq_len"],
         )
 
     dataset_val = TranslationDataset(
-        hf_ds_val, 
-        tokenizer_src=tokenizer_src,
-        tokenizer_tgt=tokenizer_tgt,
-        max_len=128)
+        ds_val, 
+        tokenizer_src=tokenizer,
+        tokenizer_tgt=tokenizer,
+        max_len=config["seq_len"])
 
     # Minimal dataloader
     dataloader_train = DataLoader(
@@ -67,27 +77,57 @@ if __name__ == "__main__":
         collate_fn=collate_fn, 
         drop_last=True)
 
-
     model = Transformer(
-        vocab_size=500,
-        seq_len=128,
-        d_model=128,
-        d_ff=256,
-        n_heads=4,
-        N=3,
+        vocab_size=vocab_size,
+        seq_len=config["seq_len"],
+        d_model=d_model,
+        d_ff=d_ff,
+        n_heads=n_heads,
+        N=N,
         pad_token_id=0,
         eos_token_id=2,
         p_dropout=0.1
     )
+
     lit_model = LitTransformer(model)
 
     trainer = L.Trainer(
     max_epochs=200,
     check_val_every_n_epoch=10,
     callbacks=[
-        ModelCheckpoint(dirpath=experiment_root, save_last=True, ),
+        ModelCheckpoint(dirpath=config["sweep_root"] / str(trial.number), save_last=True, every_n_epochs=10, save_top_k=3),
         EarlyStopping(monitor="val_loss", mode="min")],
-    logger=[CSVLogger(save_dir=experiment_root)],
+    logger=[
+        CSVLogger(save_dir=config["sweep_root"] / str(trial.number)), 
+        TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))],
     )
 
     trainer.fit(lit_model, dataloader_train, dataloader_val)
+
+    
+    
+if __name__ == "__main__":
+    
+    config = {
+        "sweep_name":"multi30k",
+        "sweep_root":paths.EXPERIMENTS_DIR / "sweeps" / "multi30k",
+        "dataset_root":"bentrevett/multi30k",
+        "seq_len":128,
+        "n_epochs":200,
+        "eval_freq":10,
+        "max_epochs":200,
+        "num_workers":16,
+        "early_stopping_patience":10,
+    }
+    import os
+
+    os.makedirs(config["sweep_root"], exist_ok=True)
+    with open(config["sweep_root"] / "git_hash", mode="w") as f:
+        f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
+
+    storage = optuna.storages.JournalStorage(
+        optuna.storages.journal.JournalFileBackend(str(config["sweep_root"] / "optuna.log"))
+    )
+    study = optuna.create_study(storage=storage)
+    study.optimize(partial(objective, config=config), n_trials=1000, timeout=None, n_jobs=1)
+
