@@ -13,19 +13,10 @@ from torch.utils.data import DataLoader
 from src.models.transformer import Transformer
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.tokenizers.BPE import BytePairEncoding
+from src.train.utils.git_callback import GitCallback
 from src.utils import paths
 
 
-class GitCallback(Callback):
-
-    def __init__(self, experiment_root) -> None:
-        super().__init__()
-        self.experiment_root = experiment_root
-
-    def on_fit_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        
-        with open(self.experiment_root / "git_hash", mode="w") as f:
-            f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
 
 
 @dataclass
@@ -93,6 +84,7 @@ class LitTransformer(L.LightningModule):
     #     input_seq, target_seq = batch
     #     generated = self.model.translate(input_seq)
     #     self._val_preds
+
 
     def test_step(self, batch, batch_idx):
         pass
