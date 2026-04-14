@@ -42,9 +42,11 @@ class Args:
 
 
 class LitTransformer(L.LightningModule):
-    def __init__(self, transformer):
+    def __init__(self, transformer, lr=1e-3):
         super().__init__()
         self.transformer = transformer
+        self.lr = lr
+        self.save_hyperparameters(ignore=["transformer"])
 
 
     def training_step(self, batch, batch_idx):
@@ -90,7 +92,7 @@ class LitTransformer(L.LightningModule):
         pass
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
 
         

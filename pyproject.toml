@@ -14,7 +14,9 @@ dependencies = [
     "sacrebleu",
     "matplotlib",
     "lightning",
-    "optuna"
+    "optuna",
+    "optuna-integration[pytorch-lightning]",
+    "tensorboard",
 ]
 
 [build-system]

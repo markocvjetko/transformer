@@ -17,9 +17,8 @@ export TRANSFORMER_EXPERIMENTS_DIR=/scratch/${USER}/experiments
 export HF_HOME=/scratch/${USER}/.cache/huggingface
 
 # ── Environment ──────────────────────────────────────────────────────
-# Uncomment / adjust for your cluster's module system:
-# module load python/3.10
-# module load cuda/12.1
+module load python/3.10
+module load cuda/12.1
 
 # cd to the project root (where pyproject.toml lives)
 cd /scratch/${USER}/transformer

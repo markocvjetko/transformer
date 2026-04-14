@@ -1,15 +1,17 @@
 """
 A simple hyperparameter sweep script with Optuna.
 """
+import json
 import os
 import subprocess
 from functools import partial
 from torch.utils.data import DataLoader
-from datasets import load_dataset
+from datasets import load_from_disk
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 import optuna
+from optuna.integration import PyTorchLightningPruningCallback
 
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.models.transformer import Transformer
@@ -35,7 +37,7 @@ def objective(trial: optuna.Trial, config):
     batch_size_exp = trial.suggest_int("batch_size_exp", 6, 11)
     batch_size = 2 ** batch_size_exp
 
-    dataset = load_dataset("bentrevett/multi30k", cache_dir=paths.DATA_DIR)
+    dataset = load_from_disk(str(paths.DATA_DIR / "multi30k"))
     ds_train = dataset["train"]
     ds_val = dataset["validation"]
 
@@ -49,7 +51,7 @@ def objective(trial: optuna.Trial, config):
     tokenizer.save(config["sweep_root"] / str(trial.number) / "tokenizer.json")
     
     dataset_train = TranslationDataset(
-        ds_train,#.select(range(batch_size)), 
+        ds_train, 
         tokenizer_src=tokenizer,
         tokenizer_tgt=tokenizer,
         max_len=config["seq_len"],
@@ -89,22 +91,30 @@ def objective(trial: optuna.Trial, config):
         p_dropout=0.1
     )
 
-    lit_model = LitTransformer(model)
+    lit_model = LitTransformer(model, lr)
 
     trainer = L.Trainer(
-    max_epochs=200,
-    check_val_every_n_epoch=10,
-    callbacks=[
-        ModelCheckpoint(dirpath=config["sweep_root"] / str(trial.number), save_last=True, every_n_epochs=10, save_top_k=3),
-        EarlyStopping(monitor="val_loss", mode="min")],
-    logger=[
-        CSVLogger(save_dir=config["sweep_root"] / str(trial.number)), 
-        TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))],
+        max_epochs=config["max_epochs"],
+        check_val_every_n_epoch=config["check_val_every_n_epoch"],
+        callbacks=[
+            ModelCheckpoint(
+                dirpath=config["sweep_root"] / str(trial.number), 
+                save_last=True, 
+                every_n_epochs=1, 
+                save_top_k=3,
+                monitor="val_loss"),
+            EarlyStopping(monitor="val_loss", mode="min"),
+            PyTorchLightningPruningCallback(trial, monitor="val_loss")
+        ],
+        logger=[
+            CSVLogger(save_dir=config["sweep_root"] / str(trial.number)), 
+            TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
+        ],
     )
 
     trainer.fit(lit_model, dataloader_train, dataloader_val)
 
-    
+    return trainer.callback_metrics["val_loss"].item()
     
 if __name__ == "__main__":
     
@@ -112,22 +122,28 @@ if __name__ == "__main__":
         "sweep_name":"multi30k",
         "sweep_root":paths.EXPERIMENTS_DIR / "sweeps" / "multi30k",
         "dataset_root":"bentrevett/multi30k",
-        "seq_len":128,
-        "n_epochs":200,
-        "eval_freq":10,
+        "seq_len":256,
+        "check_val_every_n_epoch":10,
         "max_epochs":200,
         "num_workers":16,
         "early_stopping_patience":10,
     }
-    import os
 
     os.makedirs(config["sweep_root"], exist_ok=True)
     with open(config["sweep_root"] / "git_hash", mode="w") as f:
         f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
+    with open(config["sweep_root"] /  'config.json', 'w') as f:
+        json.dump(config, f, default=str)
 
     storage = optuna.storages.JournalStorage(
         optuna.storages.journal.JournalFileBackend(str(config["sweep_root"] / "optuna.log"))
     )
-    study = optuna.create_study(storage=storage)
+    study = optuna.create_study(
+        study_name="multi30k_test",
+        storage=storage,
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=20),
+        load_if_exists=True
+        )
     study.optimize(partial(objective, config=config), n_trials=1000, timeout=None, n_jobs=1)
 
