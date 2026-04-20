@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from datasets import load_dataset
 import lightning as L
-from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.loggers import CSVLogger
 from torch import optim, nn
 from torch.utils.data import DataLoader
 

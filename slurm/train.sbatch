@@ -6,30 +6,31 @@
 #SBATCH --mem=32G
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/slurm-%j.out
+#SBATCH --error=logs/slurm-%j.err
 
 # ── Paths ────────────────────────────────────────────────────────────
 # Point data / experiments to scratch so we don't fill the home quota.
 # Adjust these to match your cluster's filesystem layout.
-export TRANSFORMER_DATA_DIR=/scratch/${USER}/data
-export TRANSFORMER_EXPERIMENTS_DIR=/scratch/${USER}/experiments
+export DATA_DIR=/${SCRATCH}/transformer/data
+export EXPERIMENTS_DIR=/${SCRATCH}/transformer/experiments
 
 # HuggingFace also caches to ~/.cache by default — redirect it too.
-export HF_HOME=/scratch/${USER}/.cache/huggingface
+export HF_HOME=/${SCRATCH}/.cache/huggingface
 
 # ── Environment ──────────────────────────────────────────────────────
-module load python/3.10
-module load cuda/12.1
+module purge
+module load python/3.11.5
+module load cuda/12.8.0
+conda activate transformer
+
 
 # cd to the project root (where pyproject.toml lives)
-cd /scratch/${USER}/transformer
-
-# Activate the project's virtual environment
-source .venv/bin/activate
+cd /${WORK}/proj/transformer
 
 # ── Create directories if needed ─────────────────────────────────────
-mkdir -p "$TRANSFORMER_DATA_DIR"
-mkdir -p "$TRANSFORMER_EXPERIMENTS_DIR"
+mkdir -p "$DATA_DIR"
+mkdir -p "$EXPERIMENTS_DIR"
 mkdir -p logs
 
 # ── Run ──────────────────────────────────────────────────────────────
-python -m src.train.train_transformer
+python -m scripts.sweep_multi30k.py
