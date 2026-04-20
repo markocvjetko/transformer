@@ -24,7 +24,7 @@ from src.utils import paths
 def objective(trial: optuna.Trial, config):
     #suggest params,
 
-    vocab_size_exp =  trial.suggest_int("vocab_size_exp", 8, 15)
+    vocab_size_exp =  trial.suggest_int("vocab_size_exp", 8, 14)
     vocab_size = 2 ** vocab_size_exp
     d_model_exp = trial.suggest_int("d_model_exp", 5, 8) 
     d_model = 2 ** d_model_exp
@@ -133,9 +133,9 @@ def main(git_hash: str):
         "dataset_root": "bentrevett/multi30k",
         "seq_len": 256,
         "check_val_every_n_epoch": 10,
-        "max_epochs": 200,
+        "max_epochs": 500,
         "num_workers": 16,
-        "early_stopping_patience": 10,
+        "early_stopping_patience": 25,
     }
     os.makedirs(config["sweep_root"], exist_ok=True)
     with open(config["sweep_root"] / "git_hash", mode="w") as f:
@@ -153,7 +153,7 @@ def main(git_hash: str):
         pruner=optuna.pruners.MedianPruner(n_warmup_steps=20),
         load_if_exists=True,
     )
-    study.optimize(partial(objective, config=config), n_trials=50, timeout=None, n_jobs=1)
+    study.optimize(partial(objective, config=config), n_trials=100, timeout=None, n_jobs=1)
 
 
 if __name__ == "__main__":
