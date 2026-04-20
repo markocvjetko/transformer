@@ -11,6 +11,7 @@ log_dir.mkdir(parents=True, exist_ok=True)
 
 git_hash = git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
+
 cmd = [
     "sbatch",
     f"--job-name={exp_name}",

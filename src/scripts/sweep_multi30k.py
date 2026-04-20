@@ -96,7 +96,7 @@ def objective(trial: optuna.Trial, config):
     trainer = L.Trainer(
         accelerator="gpu",
         max_epochs=config["max_epochs"],
-        log_every_n_steps=1,
+        log_every_n_steps=10,    
         check_val_every_n_epoch=config["check_val_every_n_epoch"],
         callbacks=[
             ModelCheckpoint(
