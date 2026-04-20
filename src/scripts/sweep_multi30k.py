@@ -145,5 +145,5 @@ if __name__ == "__main__":
         pruner=optuna.pruners.MedianPruner(n_warmup_steps=20),
         load_if_exists=True
         )
-    study.optimize(partial(objective, config=config), n_trials=200, timeout=None, n_jobs=1)
+    study.optimize(partial(objective, config=config), n_trials=50, timeout=None, n_jobs=1)
 
