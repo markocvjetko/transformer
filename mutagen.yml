@@ -1,0 +1,19 @@
+sync:
+  defaults:
+    mode: "one-way-safe"
+    ignore:
+      vcs: true
+      paths:
+        - "data/"
+        - "experiments/"
+        - "wandb/"
+        - "logs/"
+        - ".venv/"
+        - "__pycache__/"
+        - "*.egg-info/"
+        - "**/*.ckpt"
+        - "**/*.pt"
+        - "**/*.pyc"
+  transformer:
+    alpha: "."
+    beta: "jz:/lustre/fswork/projects/rech/imi/uix29qp/proj/transformer"   # ← fix this path

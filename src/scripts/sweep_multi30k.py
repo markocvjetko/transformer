@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from datasets import load_from_disk
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger, WandbLogger
 import optuna
 from optuna.integration import PyTorchLightningPruningCallback
 
@@ -110,7 +110,12 @@ def objective(trial: optuna.Trial, config):
         ],
         logger=[
             CSVLogger(save_dir=config["sweep_root"] / str(trial.number)), 
-            TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
+            WandbLogger(
+                name=str(trial.number),
+                save_dir=config["sweep_root"] /str(trial.number),
+                project=config["sweep_name"],
+                offline=True)
+            #TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
         ],
     )
     try:
@@ -121,24 +126,21 @@ def objective(trial: optuna.Trial, config):
 
     return trainer.callback_metrics["val_loss"].item()
     
-if __name__ == "__main__":
-    
+def main(git_hash: str):
     config = {
-        "sweep_name":"multi30k",
-        "sweep_root":paths.EXPERIMENTS_DIR / "sweeps" / "multi30k",
-        "dataset_root":"bentrevett/multi30k",
-        "seq_len":256,
-        "check_val_every_n_epoch":10,
-        "max_epochs":200,
-        "num_workers":16,
-        "early_stopping_patience":10,
+        "sweep_name": "multi30k",
+        "sweep_root": paths.EXPERIMENTS_DIR / "sweeps" / "multi30k",
+        "dataset_root": "bentrevett/multi30k",
+        "seq_len": 256,
+        "check_val_every_n_epoch": 10,
+        "max_epochs": 200,
+        "num_workers": 16,
+        "early_stopping_patience": 10,
     }
-
     os.makedirs(config["sweep_root"], exist_ok=True)
     with open(config["sweep_root"] / "git_hash", mode="w") as f:
-        #f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
-        f.write(os.environ["GIT_HASH"])
-    with open(config["sweep_root"] /  'config.json', 'w') as f:
+        f.write(git_hash)
+    with open(config["sweep_root"] / "config.json", "w") as f:
         json.dump(config, f, default=str)
 
     storage = optuna.storages.JournalStorage(
@@ -149,7 +151,10 @@ if __name__ == "__main__":
         storage=storage,
         direction="minimize",
         pruner=optuna.pruners.MedianPruner(n_warmup_steps=20),
-        load_if_exists=True
-        )
+        load_if_exists=True,
+    )
     study.optimize(partial(objective, config=config), n_trials=50, timeout=None, n_jobs=1)
 
+
+if __name__ == "__main__":
+    main(git_hash=os.environ.get("GIT_HASH", "unknown"))

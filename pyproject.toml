@@ -15,8 +15,11 @@ dependencies = [
     "matplotlib",
     "lightning",
     "optuna",
+    "optuna-dashboard",
     "optuna-integration[pytorch-lightning]",
     "tensorboard",
+    "wandb",
+    "submitit"
 ]
 
 [build-system]
