@@ -4,8 +4,7 @@
 #SBATCH --partition=gpu_p13                                                                                                                                                             
 #SBATCH --gres=gpu:1                                                                                                                                                                    
 ##SBATCH --qos=qos_gpu-dev                                                                                                                                                               
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=20
 #SBATCH --time=18:59:00          
 #SBATCH --output=logs/slurm-%j.out
 #SBATCH --error=logs/slurm-%j.err
