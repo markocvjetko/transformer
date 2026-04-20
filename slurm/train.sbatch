@@ -24,6 +24,7 @@ module load python/3.11.5
 module load cuda/12.8.0
 conda activate transformer
 
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 
 # cd to the project root (where pyproject.toml lives)
 cd /${WORK}/proj/transformer
