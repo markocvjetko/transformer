@@ -1,6 +1,9 @@
 # scripts/submit.py
 import subprocess, sys, datetime, pathlib, os
 
+SBATCH = pathlib.Path(__file__).parent / "train.sbatch"
+
+cmd = [..., str(SBATCH)]
 exp_name = sys.argv[1] if len(sys.argv) > 1 else "run"
 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 exp_dir = pathlib.Path(os.environ["SCRATCH"]) / "transformer/experiments"# / f"{exp_name}-{stamp}"
