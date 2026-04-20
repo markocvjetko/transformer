@@ -77,8 +77,7 @@ def objective(trial: optuna.Trial, config):
         batch_size=batch_size, 
         shuffle=False,
         num_workers=16,
-        collate_fn=collate_fn, 
-        drop_last=True)
+        collate_fn=collate_fn)
 
     model = Transformer(
         vocab_size=vocab_size,
@@ -95,6 +94,7 @@ def objective(trial: optuna.Trial, config):
     lit_model = LitTransformer(model, lr)
 
     trainer = L.Trainer(
+        accelerator="gpu",
         max_epochs=config["max_epochs"],
         check_val_every_n_epoch=config["check_val_every_n_epoch"],
         callbacks=[
