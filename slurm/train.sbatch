@@ -34,4 +34,4 @@ mkdir -p "$EXPERIMENTS_DIR"
 mkdir -p logs
 
 # ── Run ──────────────────────────────────────────────────────────────
-python -m scripts.sweep_multi30k.py
+python -m scripts.sweep_multi30k
