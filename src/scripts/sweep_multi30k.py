@@ -4,6 +4,7 @@ A simple hyperparameter sweep script with Optuna.
 import json
 import os
 import subprocess
+import torch
 from functools import partial
 from torch.utils.data import DataLoader
 from datasets import load_from_disk
@@ -111,8 +112,11 @@ def objective(trial: optuna.Trial, config):
             TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
         ],
     )
-
-    trainer.fit(lit_model, dataloader_train, dataloader_val)
+    try:
+        trainer.fit(lit_model, dataloader_train, dataloader_val)
+    except torch.cuda.OutOfMemoryError:
+        torch.cuda.empty_cache()
+        raise optuna.TrialPruned()
 
     return trainer.callback_metrics["val_loss"].item()
     

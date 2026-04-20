@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=transformer
 #SBATCH --account=imi@v100                                                                                                                                                              
-#SBATCH --partition=gpu_p13                                                                                                                                                             
+#SBATCH --partition=gpu_p2s                                                                                                                                                        
 #SBATCH --gres=gpu:1                                                                                                                                                                    
 ##SBATCH --qos=qos_gpu-dev                                                                                                                                                               
 #SBATCH --cpus-per-task=20
