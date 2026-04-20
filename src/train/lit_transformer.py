@@ -75,7 +75,6 @@ class LitTransformer(L.LightningModule):
         target_labels = target_seq[:, 1:]    # All but first token (shifted)
         
         outputs = self.transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
-        print(outputs.shape)
         loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
         # Logging to TensorBoard (if installed) by default
         self.log("val_loss", loss, on_step=False, on_epoch=True)
