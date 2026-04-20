@@ -131,7 +131,8 @@ if __name__ == "__main__":
 
     os.makedirs(config["sweep_root"], exist_ok=True)
     with open(config["sweep_root"] / "git_hash", mode="w") as f:
-        f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
+        #f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
+        f.write(os.environ["GIT_HASH"], text=True)
     with open(config["sweep_root"] /  'config.json', 'w') as f:
         json.dump(config, f, default=str)
 
