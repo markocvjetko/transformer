@@ -13,6 +13,7 @@ from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger, WandbLogger
 import optuna
 from optuna.integration import PyTorchLightningPruningCallback
+import wandb
 
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.models.transformer import Transformer
@@ -123,7 +124,9 @@ def objective(trial: optuna.Trial, config):
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
         raise optuna.TrialPruned()
-
+    finally:
+        wandb.finish()
+        
     return trainer.callback_metrics["val_loss"].item()
     
 def main(git_hash: str):
@@ -150,7 +153,7 @@ def main(git_hash: str):
         study_name="multi30k_test",
         storage=storage,
         direction="minimize",
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=20),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=20),
         load_if_exists=True,
     )
     study.optimize(partial(objective, config=config), n_trials=100, timeout=None, n_jobs=1)
