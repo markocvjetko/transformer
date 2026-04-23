@@ -7,17 +7,22 @@ class TranslationDataset(Dataset):
 
     def __init__(
         self, 
-        hf_dataset, 
+        dataset, 
+        src_lang,
+        tgt_lang,
         tokenizer_src: BytePairEncoding, 
         tokenizer_tgt: BytePairEncoding, 
         max_len: int = 128,
         pad_token = 0,
         bos_token = 1,
         eos_token = 2,
-        unk_token = 3
+        unk_token = 3hf_dataset
     ):
 
-        self.hf_dataset = hf_dataset
+        self.dataset = dataset
+        self.src_lang = src_lang
+        self.tgt_lang = tgt_lang
+
         self.tokenizer_src = tokenizer_src
         self.tokenizer_tgt = tokenizer_tgt
         self.max_len = max_len
@@ -38,8 +43,8 @@ class TranslationDataset(Dataset):
         Where src_seq_len and tgt_seq_len are the lengths of the tokenized source and target sentences,
         respectively, before any batching or padding.
         """
-        tokens_src = self.tokenizer_src.tokenize(self.hf_dataset[idx]["en"], add_special=True)
-        tokens_tgt = self.tokenizer_tgt.tokenize(self.hf_dataset[idx]["de"], add_special=True)
+        tokens_src = self.tokenizer_src.tokenize(self.dataset[idx][self.src_lang], add_special=True)
+        tokens_tgt = self.tokenizer_tgt.tokenize(self.dataset[idx][self.tgt_lang], add_special=True)
         
         return {
             "src": torch.tensor(tokens_src, dtype=torch.long),
@@ -55,4 +60,3 @@ def collate_fn(batch, pad_token=0):
     tgt_padded = torch.nn.utils.rnn.pad_sequence(tgt_tensors, batch_first=True, padding_value=pad_token)
 
     return src_padded, tgt_padded
-
