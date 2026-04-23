@@ -19,7 +19,9 @@ dependencies = [
     "optuna-integration[pytorch-lightning]",
     "tensorboard",
     "wandb",
-    "submitit"
+    "submitit",
+    "translate-toolkit",
+    "lxml"
 ]
 
 [build-system]
