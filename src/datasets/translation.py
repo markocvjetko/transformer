@@ -16,7 +16,7 @@ class TranslationDataset(Dataset):
         pad_token = 0,
         bos_token = 1,
         eos_token = 2,
-        unk_token = 3hf_dataset
+        unk_token = 3
     ):
 
         self.dataset = dataset
@@ -33,7 +33,7 @@ class TranslationDataset(Dataset):
         self.unk_token = unk_token
 
     def __len__(self):
-        return len(self.hf_dataset)
+        return len(self.dataset)
 
     def __getitem__(self, idx):
         """

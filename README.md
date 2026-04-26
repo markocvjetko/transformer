@@ -51,3 +51,23 @@ For the purposes of this codebase, Optuna syncing via a journal.log file works w
 Refactored lightning training config managment
 
 Todays commits should have been on main, not beam_search branch
+
+
+24.04.2026.
+
+Add hrenwac_v2 dataset support
+WORK IN PROGRESS: Refactor translation dataset to handle any source and target language.
+    - minor change, do not overthink it.
+
+MISSION: Train single model on opus_100, hrenwac and jwl_300
+
+
+27.04.2026.
+
+COMPLETE:
+- translation dataset refactored
+- 37000 tokenizer trained
+- training en-hr runs
+
+TODO:
+Train model!
