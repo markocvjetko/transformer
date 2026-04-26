@@ -1,8 +1,10 @@
 from collections import Counter, defaultdict
 import re
 import json
+import heapq
 
 from pathlib import Path
+from tqdm import tqdm
 
 class BytePairEncoding: #Byte Pair Encoding
 
@@ -151,36 +153,74 @@ class BytePairEncoding: #Byte Pair Encoding
             self.vocab[char] = i + idx_offset
             self.inv_vocab[i + idx_offset] = char
 
-        word_tokenizations = {word: list(word) for word in words}
+        word_tokenizations = {word: list(word) for word in counts.keys()}
+
+        #tracks which tokens are present for which words. For smart merging.
+        token_to_words = defaultdict(set)
+        token_pair_counts = defaultdict(lambda: 0)
+        
+   
+        for word, tokens in word_tokenizations.items():
+            for token in tokens:
+                token_to_words[token].add(word)
+            for i in range(len(tokens)-1):
+                token_pair_counts[(tokens[i], tokens[i+1])] += counts[word]
+
+        heap = []
+        for pair, c in token_pair_counts.items():
+            heapq.heappush(heap, (-c, pair))
 
         while len(self._special_vocab) + len(self.vocab) < self.vocab_size:
-            #count all token pairs
-            token_pair_counts = defaultdict(int)
-            for word in counts:
-                tokenized_word = word_tokenizations[word]
-                for i in range(len(tokenized_word) - 1):
-                    substring = "".join(tokenized_word[i:i+2])
-                    token_pair_counts[substring] += counts[word]
-
-            if not token_pair_counts:
+            
+            # pop until we find a valid top
+            while heap:
+                neg_count, pair = heap[0]
+                if -neg_count == token_pair_counts.get(pair, 0) and -neg_count > 0:
+                    break
+                heapq.heappop(heap)
+            else:
                 print("No token pairs found, stopping training.")
                 return
 
-            most_common_pair = max(token_pair_counts, key=token_pair_counts.get)
+            if -neg_count < self.min_frequency:
+                print("No more token pairs above min_frequency, fitting stopped")
+                print("Vocab size", len(self.vocab))
+                return
 
-            if token_pair_counts[most_common_pair] < self.min_frequency:
-                    print("No more token pairs above min_frequency, fitting stopped")
-                    print("Vocab size", len(self.vocab))
-                    return
-
-            #add the most common_token to the tokenizer structs
+            heapq.heappop(heap)
+            token_a, token_b = pair
+            most_common_pair = token_a + token_b
+            print(len(self._special_vocab) + len(self.vocab), most_common_pair, -neg_count)
             next_idx = len(self.vocab)
             self.vocab[most_common_pair] = next_idx + idx_offset
             self.inv_vocab[next_idx + idx_offset] = most_common_pair
 
-            # apply to tokenized_words (modifies tokenized_words in place)
-            for word, tokens in word_tokenizations.items():
-                word_tokenizations[word] = self._merge_pair(tokens, most_common_pair)
+            affected = list(token_to_words[token_a] & token_to_words[token_b])
+            for word in affected:
+                old_tok = word_tokenizations[word]
+                new_tok = self._merge_pair(old_tok, most_common_pair)
+                if new_tok == old_tok:
+                    continue
+                word_tokenizations[word] = new_tok
+                w_count = counts[word]
+
+                # only update pairs whose multiplicity actually changed
+                old_pairs = Counter(zip(old_tok, old_tok[1:]))
+                new_pairs = Counter(zip(new_tok, new_tok[1:]))
+                for p in old_pairs.keys() | new_pairs.keys():
+                    delta = new_pairs[p] - old_pairs[p]
+                    if delta:
+                        token_pair_counts[p] += delta * w_count
+                        heapq.heappush(heap, (-token_pair_counts[p], p))
+
+                if most_common_pair in new_tok:
+                    token_to_words[most_common_pair].add(word)
+                if token_a not in new_tok:
+                    token_to_words[token_a].discard(word)
+                if token_b not in new_tok:
+                    token_to_words[token_b].discard(word)
+
+
 
     def save(self, path: str):
 
@@ -228,7 +268,7 @@ class BytePairEncoding: #Byte Pair Encoding
     
 if __name__ == "__main__":
 
-    tokenizer = BytePairEncoding(vocab_size=600, min_frequency=2)
+    tokenizer = BytePairEncoding(vocab_size=650, min_frequency=2)
     large_paragraph = (
         "Byte Pair Encoding (BPE) is a simple form of data compression in which the most frequent pair of bytes in a sequence "
         "of bytes is replaced with a byte that does not occur within that sequence. This procedure is repeated until no more "
@@ -257,7 +297,7 @@ if __name__ == "__main__":
     tokenizer.fit(wiki_texts)
     #print(tokenizer.vocab)
     print(tokenizer.tokenize("This sentence will be tokenized"))
-    print([tokenizer.decode([token]) for token in tokenizer.tokenize("This sentece will be tokenized")])
+    print([tokenizer.decode([token]) for token in tokenizer.tokenize("This sentence will be tokenized")])
     print(tokenizer.decode(tokenizer.tokenize("This sentence will be tokenized")))
     print(tokenizer.decode(tokenizer.tokenize("token")))
     print(tokenizer.tokenize("token"))
