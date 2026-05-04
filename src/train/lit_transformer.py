@@ -63,7 +63,7 @@ class LitTransformer(L.LightningModule):
             
         loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
         # Logging to TensorBoard (if installed) by defaultexperiment_name
-        self.log("train_loss", loss, on_step=False, on_epoch=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True)
         return loss
     
 
