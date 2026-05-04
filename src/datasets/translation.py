@@ -43,8 +43,8 @@ class TranslationDataset(Dataset):
         Where src_seq_len and tgt_seq_len are the lengths of the tokenized source and target sentences,
         respectively, before any batching or padding.
         """
-        tokens_src = self.tokenizer_src.tokenize(self.dataset[idx][self.src_lang], add_special=True)
-        tokens_tgt = self.tokenizer_tgt.tokenize(self.dataset[idx][self.tgt_lang], add_special=True)
+        tokens_src = self.tokenizer_src.tokenize(self.dataset[idx][self.src_lang], max_length=self.max_len, add_special=True)
+        tokens_tgt = self.tokenizer_tgt.tokenize(self.dataset[idx][self.tgt_lang], max_length=self.max_len, add_special=True)
         
         return {
             "src": torch.tensor(tokens_src, dtype=torch.long),
