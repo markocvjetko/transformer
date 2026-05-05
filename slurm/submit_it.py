@@ -30,9 +30,6 @@ if __name__ == "__main__":
     parser.add_argument("--log-subdir", default="submitit")
     args = parser.parse_args()
 
-    cpus_per_task=args.cpus_per_task,
-    tasks_per_node=args.gpus,
-
     root = "SCRATCH"
     project_root = Path(__file__).resolve().parent.parent
     log_root = Path(os.environ[root]) / "proj" / "transformer" / args.log_subdir
@@ -78,8 +75,8 @@ if __name__ == "__main__":
             "export TRANSFORMERS_OFFLINE=1",
             "export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH",
             "export DATA_DIR=${" + root + "}/proj/transformer/data",
-            "export EXPERIMENTS_DIR=${WORK}/proj/transformer/experiments",
-            "export HF_HOME=${WORK}/.cache/huggingface",
+            "export EXPERIMENTS_DIR=${SCRATCH}/proj/transformer/experiments",
+            #"export HF_HOME=${WORK}/.cache/huggingface",
             "export ON_JZ=TRUE",
             f"export GIT_HASH={git_hash}",
             f"export PYTHONPATH={snapshot}:$PYTHONPATH",
