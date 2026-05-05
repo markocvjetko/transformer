@@ -22,14 +22,16 @@ if __name__ == "__main__":
     parser.add_argument("--partition", default="gpu_p13")
     parser.add_argument("--qos", default="qos_gpu-dev",
                         help="qos_gpu-t3 (≤20h), qos_gpu-t4 (≤100h), qos_gpu-dev (≤2h)")
-    parser.add_argument("--constraint", default=None,
+    parser.add_argument("--constraint", default="v100-32g",
                         help="e.g. v100-32g, v100-16g")
-    parser.add_argument("--nodes", type=int, default=1)
-    parser.add_argument("--cpus", type=int, default=10)
+    parser.add_argument("--cpus-per-task", type=int, default=10)
     parser.add_argument("--gpus", type=int, default=1)
     parser.add_argument("--timeout-min", type=int, default=1 * 60 + 59)
     parser.add_argument("--log-subdir", default="submitit")
     args = parser.parse_args()
+
+    cpus_per_task=args.cpus_per_task,
+    tasks_per_node=args.gpus,
 
     root = "SCRATCH"
     project_root = Path(__file__).resolve().parent.parent
@@ -59,8 +61,9 @@ if __name__ == "__main__":
         slurm_partition=args.partition,
         slurm_qos=args.qos,
         slurm_gres=f"gpu:{args.gpus}",
-        nodes=args.nodes,
-        cpus_per_task=args.cpus,
+        tasks_per_node=args.gpus,                  
+        cpus_per_task=args.cpus_per_task,      
+        nodes=1,                                   
         timeout_min=args.timeout_min,
         slurm_additional_parameters=slurm_extra,
         slurm_setup=[
@@ -68,9 +71,14 @@ if __name__ == "__main__":
             "module load python/3.11.5",
             "module load cuda/12.8.0",
             "conda activate transformer",
+            "export WANDB_MODE=offline",
+            "unset WANDB_API_KEY",
+            "export HF_DATASETS_OFFLINE=1",
+            "export HF_HUB_OFFLINE=1",
+            "export TRANSFORMERS_OFFLINE=1",
             "export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH",
             "export DATA_DIR=${" + root + "}/proj/transformer/data",
-            "export EXPERIMENTS_DIR=${" + root + "}/proj/transformer/experiments",
+            "export EXPERIMENTS_DIR=${WORK}/proj/transformer/experiments",
             "export HF_HOME=${" + root + "}/.cache/huggingface",
             "export ON_JZ=TRUE",
             f"export GIT_HASH={git_hash}",

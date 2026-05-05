@@ -1,7 +1,7 @@
 import os
 import torch
 from torch.utils.data import DataLoader
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
@@ -34,8 +34,8 @@ def main():
         "tgt_lang": "hr",
 
         "check_val_every_n_epoch": 1,
-        "max_epochs": 50,
-        "num_workers": 24,
+        "max_epochs": 3,
+        "num_workers": 10,
         "early_stopping_patience": 5,
     }
 
@@ -46,13 +46,12 @@ def main():
     n_heads = 8
     N = 6
     lr = 3e-4
-    batch_size = 32
+    batch_size = 128
 
     opus = load_dataset("Helsinki-NLP/opus-100", "en-hr", cache_dir=config["opus"])
     jwl = load_dataset("sentence-transformers/parallel-sentences-jw300", "en-hr", cache_dir=config["jwl_300"])
     jwl = jwl.rename_columns({"english":"en", "non_english":"hr"})
     hrenwac = HrenWac(path=config["hrenwac"])
-
 
     print(len(opus["train"]))
     print(len(jwl["train"]))
@@ -66,6 +65,11 @@ def main():
     ds_val = ConcatDataset([opus["validation"]["translation"]])
     print(len(ds_train))
     print(len(ds_val))
+
+    # hrenwac = HrenWac(path=config["hrenwac"])
+    # ds_train = ConcatDataset([hrenwac])
+    # ds_val = ConcatDataset([hrenwac])
+   
 
     tokenizer = BytePairEncoding.from_file(config["tokenizer_path"])
 
@@ -119,9 +123,13 @@ def main():
     trainer = L.Trainer(
         accelerator="gpu",
         max_epochs=config["max_epochs"],
-        log_every_n_steps=10,    
+        devices=-1,        # or just devices=-1
+        num_nodes=1,
+        strategy="ddp",
+        limit_train_batches=5, 
+        limit_val_batches=5,
+        log_every_n_steps=100,    
         check_val_every_n_epoch=config["check_val_every_n_epoch"],
-        accumulate_grad_batches=16,
         callbacks=[
             ModelCheckpoint(
                 dirpath=config["save_dir"], 
@@ -137,7 +145,7 @@ def main():
                 name=str("project_name"),
                 save_dir=config["save_dir"],
                 project=config["project_name"],
-                offline=False)
+                offline=os.environ.get("WANDB_MODE", "online") == "offline")
         ],
     )
     try:
@@ -145,8 +153,23 @@ def main():
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
         run = wandb.run
-        if run is not None:
+        if run is not None and os.environ.get("WANDB_MODE", "online") == "online":
             wandb.Api().run(f"{run.entity}/{run.project}/{run.id}").delete()
+        raise
+    except OSError as e:
+        if e.errno == 28:
+            import subprocess
+            save_dir = config["save_dir"]
+            print(f"=== ENOSPC during training. Capturing filesystem state for {save_dir} ===", flush=True)
+            for cmd in [
+                ["ls", "-la", str(save_dir)],
+                ["lfs", "quota", "-h", "-u", os.environ["USER"], str(save_dir)],
+                ["lfs", "quota", "-h", "-g", "imi", str(save_dir)],
+                ["df", "-h", "/tmp", str(save_dir)],
+                ["id"],
+            ]:
+                print(f"$ {' '.join(cmd)}", flush=True)
+                subprocess.run(cmd, check=False)
         raise
     finally:
         wandb.finish()
