@@ -63,7 +63,7 @@ class LitTransformer(L.LightningModule):
             
         loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
         # Logging to TensorBoard (if installed) by defaultexperiment_name
-        self.log("train_loss", loss, on_step=True, on_epoch=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
     
 
@@ -77,7 +77,7 @@ class LitTransformer(L.LightningModule):
         outputs = self.transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
         loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
         # Logging to TensorBoard (if installed) by default
-        self.log("val_loss", loss, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
     # def validation_step(self, batch, batch_idx):

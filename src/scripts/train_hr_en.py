@@ -166,6 +166,9 @@ def main():
                 ["lfs", "quota", "-h", "-u", os.environ["USER"], str(save_dir)],
                 ["lfs", "quota", "-h", "-g", "imi", str(save_dir)],
                 ["df", "-h", "/tmp", str(save_dir)],
+                # ENOSPC fix: stripe layout — if stripe_count is 1, the file was bound
+                # to a single OST and ENOSPC is likely a per-OST project quota hit.
+                ["lfs", "getstripe", "-d", str(save_dir)],
                 ["id"],
             ]:
                 print(f"$ {' '.join(cmd)}", flush=True)

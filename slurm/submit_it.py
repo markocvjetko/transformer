@@ -79,11 +79,15 @@ if __name__ == "__main__":
             "export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH",
             "export DATA_DIR=${" + root + "}/proj/transformer/data",
             "export EXPERIMENTS_DIR=${WORK}/proj/transformer/experiments",
-            "export HF_HOME=${" + root + "}/.cache/huggingface",
+            "export HF_HOME=${WORK}/.cache/huggingface",
             "export ON_JZ=TRUE",
             f"export GIT_HASH={git_hash}",
             f"export PYTHONPATH={snapshot}:$PYTHONPATH",
             "mkdir -p $DATA_DIR $EXPERIMENTS_DIR",
+            # ENOSPC fix: stripe checkpoints across 4 OSTs to avoid hitting the per-OST
+            # project quota (default JZ stripe_count=1 binds files to a single OST).
+            # No-op (and exits non-zero) if dir is already populated; that's fine.
+            "lfs setstripe -c 4 $EXPERIMENTS_DIR 2>/dev/null || true",
         ],
     )
 
