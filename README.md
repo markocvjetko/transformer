@@ -69,5 +69,12 @@ COMPLETE:
 - 37000 tokenizer trained
 - training en-hr runs
 
-TODO:
-Train model!
+
+08.05.2026.
+
+Training a model on 3 datasets (document which).
+Validation loss still falling around 50 epochs.
+Beam search implemented (transformer code needs to be cleaned, super dirty now).
+Need to refactor training script, save configs, and proper eval and document the results.
+
+train_en_hr.py currently starts from a checkpoint (HARDCODED, should be removed!)
