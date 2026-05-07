@@ -147,8 +147,8 @@ class DecoderBlock(nn.Module):
         self.ln_ff = nn.LayerNorm(d_model)
 
 
-    def forward(self, x, encoder_output, tgt_padding_mask=None, memory_padding_mask=None):
-        x = self.ln_mha_1(self.dropout(self.mha_1(x, x, x, key_padding_mask=tgt_padding_mask)) + x)
+    def forward(self, x, encoder_output, key_padding_mask=None, memory_padding_mask=None):
+        x = self.ln_mha_1(self.dropout(self.mha_1(x, x, x, key_padding_mask=key_padding_mask)) + x)
         x = self.ln_mha_2(self.dropout(self.mha_2(x, encoder_output, encoder_output, key_padding_mask=memory_padding_mask)) + x)
         x = self.ln_ff(x + self.dropout(self.ff(x)))
         return x
@@ -175,6 +175,7 @@ class Transformer(nn.Module):
         pad_token_id=0,
         eos_token_id=2,
         p_dropout=0.1
+
         ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -186,6 +187,9 @@ class Transformer(nn.Module):
         self.pad_token_id = pad_token_id
         self.eos_token_id = eos_token_id
         self.p_dropout = p_dropout
+
+        self.n_beams = 7
+        self.alpha = 0.6
 
         self.embedding_layer_encoder = EmbeddingLayer(vocab_size, d_model)
         self.embedding_layer_decoder = EmbeddingLayer(vocab_size, d_model)
@@ -235,19 +239,162 @@ class Transformer(nn.Module):
 
         return self.ff_output(decoder_output)
     
+    def translate_beam_search(self, x: torch.Tensor, y: torch.Tensor):
+        """
+        Args:
+            x: torch.Tensor (B, M)
+            y: torch.Tensor (B, N)
+        """
+
+        with torch.no_grad():
+            batch_size = x.shape[0]
+            
+
+            ### ENCODER
+            src_padding_mask = (x == self.pad_token_id)
+            x_enc = self.embedding_layer_encoder(x) * math.sqrt(self.d_model)
+            x_enc = self.positional_embedding(x_enc)
+            x_enc = self.dropout(x_enc)
+            for encoder in self.encoders:
+                x_enc = encoder(x_enc, src_padding_mask=src_padding_mask)    
+            
+            ### BEAM SEARCH PREP
+            src_padding_mask = src_padding_mask.unsqueeze(1).repeat(1, self.n_beams, 1)
+            x_enc = x_enc.unsqueeze(1).repeat(1, self.n_beams, 1, 1)
+            print("x.shape", x.shape)    
+            print("y.shape", y.shape)
+            first_log_probs = F.log_softmax(self.forward(x, y), dim=-1)  # (B, N, vocab_size)
+            
+            print(first_log_probs)
+            topk_vals, topk_indices = torch.topk(first_log_probs, k=self.n_beams, dim=-1)
+            print("initial topk vals", topk_vals)
+            print("initial topk vals shape", topk_vals.shape)
+            print("initial topk indices", topk_indices)
+            print("initial topk indices shape", topk_indices.shape) # 1, 1, 2
+            
+            
+            y = y.unsqueeze(1).repeat(1, self.n_beams, 1)
+            print(y.shape) #1, 2, 1
+            y = torch.cat((y, topk_indices.transpose(1, 2)), dim=-1)
+            print(y.shape)
+                
+
+            print("y.shape", y.shape)
+
+            print("topkvals shape", topk_vals.shape)
+            
+            log_probs = torch.zeros((batch_size, self.n_beams))  #B, n_beams
+            print("logprobs", log_probs.shape)
+            log_probs = log_probs.to(next(self.parameters()).device)
+            active_beams = torch.ones((batch_size, self.n_beams), dtype=torch.bool)
+            active_beams = active_beams.to(next(self.parameters()).device)
+            active_beams = active_beams & ~(y[:, :, -1] == self.eos_token_id)
+
+            remaining_batches = list(range(x_enc.size(0)))
+
+            while remaining_batches and y.shape[1] < self.seq_len:
+
+                x_remaining = x_enc[remaining_batches]
+                # print(f"x_remaining original shape: {x_remaining.shape}")
+                x_remaining = x_remaining.view(-1, *x_remaining.shape[2:]) 
+        
+                # print(f"x_remaining after view: {x_remaining.shape}")
+
+                y_remaining = y[remaining_batches]
+                # print(f"y_remaining original shape: {y_remaining.shape}")
+                y_remaining = y_remaining.view(-1, y_remaining.shape[-1]) #flatten the beams    
+                # print(f"y_remaining after view: {y_remaining.shape}")
+
+
+                # print("src_padding_mask.shape", src_padding_mask.shape)
+                tgt_padding_mask = (y_remaining == self.pad_token_id)
+                y_embedding = self.embedding_layer_decoder(y_remaining) * math.sqrt(self.d_model)
+                decoder_output = self.positional_embedding(y_embedding)
+                decoder_output = self.dropout(decoder_output)
+                # print("decoder_output.shape", decoder_output.shape)
+                for decoder in self.decoders:
+                    # print("decoder_output.shape (input):", decoder_output.shape)
+                    # print("x_remaining.shape:", x_remaining.shape)
+                    # print("tgt_padding_mask.shape:", tgt_padding_mask.shape)
+                    # print("src_padding_mask[remaining_batches].view(-1, *x_remaining.shape[2:]).shape:",
+                    #       src_padding_mask[remaining_batches].view(-1, *x_remaining.shape[2:]).shape)
+                    decoder_output = decoder(
+                        decoder_output,
+                        x_remaining,
+                
+                        tgt_padding_mask,
+                        src_padding_mask[remaining_batches].view(-1, *x_remaining.shape[2:]))
+                # print("---------------------------------------------------------")
+                # print("decoder_output[:, -1].shape:", decoder_output[:, -1].shape)
+                next_token = self.ff_output(decoder_output[:, -1])
+                print("next_token.shape:", next_token.shape)
+                token_logprobs = F.log_softmax(next_token)
+                print("token_logprobs.shape:", token_logprobs.shape)
+                token_logprobs = token_logprobs.reshape(x_enc.shape[0], self.n_beams, -1)
+                print(token_logprobs.shape)
+                print("max token_logprobs per beam:", token_logprobs.max(dim=-1).values)
+        
+                #always select a finished beam 
+                token_logprobs[active_beams[remaining_batches] == False] = float('-inf') 
+                token_logprobs[active_beams[remaining_batches] == False, self.pad_token_id] = 0.0
+                
+                token_logprobs[active_beams[remaining_batches], self.pad_token_id] = float('-inf')
+
+                token_logprobs += log_probs[remaining_batches].unsqueeze(-1)
+                flat_token_logprobs = token_logprobs.view(batch_size, -1)
+                topk_vals, topk_indices = torch.topk(flat_token_logprobs, k=self.n_beams, dim=-1)
+
+                log_probs[remaining_batches] = topk_vals
+                print("log_probs cumulative", log_probs)
+                # Map flat indices back to (beam, token) pairs
+                beam_indices = topk_indices // self.vocab_size
+                token_indices = topk_indices % self.vocab_size
+                
+                y_remaining = y_remaining.view(len(remaining_batches), self.n_beams, -1)
+                batch_idx = torch.arange(y_remaining.shape[0]).unsqueeze(1)
+                
+                # print("------------------------------------")
+                # print("y_remaining.shape (before indexing):", y_remaining.shape)
+                # print("remaining_indices.shape:", batch_idx.shape)
+                # print("beam_indices.shape:", beam_indices.shape)
+                y_remaining = y_remaining[batch_idx, beam_indices, :]
+                # print("y_remaining.shape (after indexing):", y_remaining.shape)
+        
+                y_remaining = torch.cat((y_remaining, token_indices.unsqueeze(-1)), dim=-1)
+
+                # print("y_rem.shape", y_remaining.shape)
+                # print("y.shape", y.shape)
+
+                y = torch.cat((y, torch.full([y.shape[0], y.shape[1], 1], self.pad_token_id).cuda()), dim=-1)
+                # print("y.shape", y.shape)
+                y[remaining_batches] = y_remaining
+
+                active_beams = active_beams[batch_idx, beam_indices]
+                just_finished = token_indices == self.eos_token_id
+                active_beams = active_beams & ~just_finished
+                if not active_beams.any():
+                    break     
+
+            #NORMALIZE AND RETURN HIGHEST LOGPROB BEAM PER BATCH BASED ON NORMALIZATION
+            lengths = y.shape[-1]
+            num_pad = (y == self.pad_token_id).sum(dim=-1)
+            normalized_lengths = (lengths - num_pad).clamp(min=1)
+            log_probs = log_probs / (normalized_lengths.float() ** self.alpha)
+            print("normalized log_probs", log_probs)
+                
+            return y
+
 
     def translate(self, x, y):
         """
         TODO - expects a tokenized sentence as encoder input and BOS token as decoder input
         Args:
-            x: torch.tensor, shape (B, N, vocab_size)
-            y: torch.tensor, shape (B, M, vocab_size)
-            Where M, N are sequence lengths.
+            x: torch.tensor, shape (B, input_seq_len) (typically (B, self.seq_len))
+            y: torch.tensor, shape (B, output_seq_len) (typically (B, 1))
         Return:
             Tensor of shape B, seq_len?
         """
 
-        #forward encoder
         src_padding_mask = (x == self.pad_token_id)
 
         #pass through embedding layer
@@ -279,7 +426,7 @@ class Transformer(nn.Module):
 
             next_token = self.ff_output(decoder_output[:, -1])
             next_token = torch.argmax(next_token, dim=-1, keepdim=True)
-            
+
             token_column = torch.full((y.shape[0], 1), self.pad_token_id, dtype=torch.long, device=y.device)
             token_column[remaining] = next_token
             next_token = token_column 
@@ -288,30 +435,89 @@ class Transformer(nn.Module):
             #update incomplete sequence tracker
             eos_mask = (next_token.squeeze(-1) == self.eos_token_id)
             remaining = [idx for idx, is_eos in zip(remaining, eos_mask) if not is_eos]
-
+        
             
         return y
         
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
+#     transformer = Transformer(
+#         vocab_size=512,
+#         seq_len=64,
+#         d_model=128,
+#         d_ff=256,
+#         n_heads=1,
+#         N=4
+#     )
+
+#     batch_size = 8
+#     seq_len = 64
+
+#     x = torch.randint(low=0, high=512, size=(batch_size, seq_len))
+#     y = torch.zeros(batch_size, 1, dtype=torch.long)
+
+#     output = transformer(x, y)
+
+
+#     print("Output shape:", output.shape)
+#     print("Output:", output)
+
+if __name__ == "__main__":
+    from src.tokenizers.BPE import BytePairEncoding
+    from src.train.lit_transformer import LitTransformer
+    import torch
+
+    # You need to instantiate the model used by LitTransformer and pass it in as the argument.
+    # Assume you know (or can specify) the Transformer architecture / args used at training.
+    # Here is an example (adjust paths/params as needed):
+
+    # Example: Load model config -- in production, load those from the checkpoint or your experiment config!
+    vocab_size = 37000          # Use actual vocab_size used for training
+    d_model = 256               # actual d_model
+    d_ff = 512                  # actual d_ff
+    n_heads = 8                 # actual n_heads
+    N = 6                       # actual N
+    seq_len = 256               # actual seq_len
+
+    # Create the underlying Transformer model -- adjust the imports and values as needed
     transformer = Transformer(
-        vocab_size=512,
-        seq_len=64,
-        d_model=128,
-        d_ff=256,
-        n_heads=1,
-        N=4
+        vocab_size=vocab_size,
+        d_model=d_model,
+        d_ff=d_ff,
+        n_heads=n_heads,
+        N=N,
+        seq_len=seq_len,
     )
 
-    batch_size = 8
-    seq_len = 64
+    transformer.eval()
 
-    x = torch.randint(low=0, high=512, size=(batch_size, seq_len))
-    y = torch.zeros(batch_size, 1, dtype=torch.long)
+    # Now load the LitTransformer with the transformer argument
+    lit_model = LitTransformer.load_from_checkpoint(
+        "/home/mcvjetko/phd/projects/transformer/experiments/en-hr/last.ckpt",
+        transformer=transformer
+    )
+    transformer = lit_model.transformer
+    transformer.cuda()
+    bpe_tokenizer = BytePairEncoding.from_file("/home/mcvjetko/phd/projects/transformer/experiments/en-hr-tokenizers/tokenizer_37000.json")
+    
 
-    output = transformer(x, y)
-
-    print("Output shape:", output.shape)
-    print("Output:", output)
+    raw = "He will translate sentences correctly, as long as the text is short."
+    text = bpe_tokenizer.tokenize(raw, max_length=256, add_special=True, pad=True)
+    #print("decoded", bpe_tokenizer.decode(text))
+    text = torch.tensor(text).to("cuda").unsqueeze(0)
+    #text = text.repeat(2, 1)
+    #print(text)Julien is running often. -> Julien često trči.
+    # print(text.shape)
+    y = torch.full((1, 1), 1, dtype=torch.long).to("cuda")
+    #y = y.repeat(2, 1)
+    print(text.shape, y.shape)
+    # print(y)
+    # print(raw + " -> " + bpe_tokenizer.decode(transformer.translate(text, y)[1].tolist()))
+    # print(raw + " -> " + bpe_tokenizer.decode(transformer.translate_beam_search(text, y)[0][0].tolist()))
+    # print(raw + " -> " + bpe_tokenizer.decode(transformer.translate_beam_search(text, y)[0][1].tolist()))
+    output = transformer.translate_beam_search(text, y)
+    for o in output:
+        for k in o:
+            print(bpe_tokenizer.decode(k))
