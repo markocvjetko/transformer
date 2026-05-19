@@ -91,6 +91,8 @@ class MultiHeadAttention(nn.Module):
             attn_score = attn_score.masked_fill(causal, float('-inf'))
         
         # Apply key padding mask (to ignore padding tokens)
+        #print("key mask", key_padding_mask.shape)
+        #print("attn score", attn_score.shape)
         if key_padding_mask is not None:
             # key_padding_mask: (batch, key_len) -> (batch, 1, 1, key_len)
             attn_score = attn_score.masked_fill(key_padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
@@ -174,10 +176,15 @@ class Transformer(nn.Module):
         N=6,
         pad_token_id=0,
         eos_token_id=2,
-        p_dropout=0.1
-
+        p_dropout=0.1,
+        n_beams=4,
+        alpha=0.6
         ):
         super().__init__()
+
+        if d_ff // n_heads != 0:
+            raise ValueError("n_heads must divide d_ff")
+
         self.vocab_size = vocab_size
         self.seq_len = seq_len
         self.d_model = d_model
@@ -188,8 +195,8 @@ class Transformer(nn.Module):
         self.eos_token_id = eos_token_id
         self.p_dropout = p_dropout
 
-        self.n_beams = 7
-        self.alpha = 0.6
+        self.n_beams = n_beams
+        self.alpha = alpha
 
         self.embedding_layer_encoder = EmbeddingLayer(vocab_size, d_model)
         self.embedding_layer_decoder = EmbeddingLayer(vocab_size, d_model)
@@ -261,30 +268,30 @@ class Transformer(nn.Module):
             ### BEAM SEARCH PREP
             src_padding_mask = src_padding_mask.unsqueeze(1).repeat(1, self.n_beams, 1)
             x_enc = x_enc.unsqueeze(1).repeat(1, self.n_beams, 1, 1)
-            print("x.shape", x.shape)    
-            print("y.shape", y.shape)
+            #print("x.shape", x.shape)    
+            #print("y.shape", y.shape)
             first_log_probs = F.log_softmax(self.forward(x, y), dim=-1)  # (B, N, vocab_size)
             
-            print(first_log_probs)
+            #print(first_log_probs)
             topk_vals, topk_indices = torch.topk(first_log_probs, k=self.n_beams, dim=-1)
-            print("initial topk vals", topk_vals)
-            print("initial topk vals shape", topk_vals.shape)
-            print("initial topk indices", topk_indices)
-            print("initial topk indices shape", topk_indices.shape) # 1, 1, 2
+            # print("initial topk vals", topk_vals)
+            # print("initial topk vals shape", topk_vals.shape)
+            # print("initial topk indices", topk_indices)
+            # print("initial topk indices shape", topk_indices.shape) # 1, 1, 2
             
             
             y = y.unsqueeze(1).repeat(1, self.n_beams, 1)
-            print(y.shape) #1, 2, 1
+            #print(y.shape) #1, 2, 1
             y = torch.cat((y, topk_indices.transpose(1, 2)), dim=-1)
-            print(y.shape)
+            #print(y.shape)
                 
 
-            print("y.shape", y.shape)
+            #print("y.shape", y.shape)
 
-            print("topkvals shape", topk_vals.shape)
+            #print("topkvals shape", topk_vals.shape)
             
             log_probs = torch.zeros((batch_size, self.n_beams))  #B, n_beams
-            print("logprobs", log_probs.shape)
+            #print("logprobs", log_probs.shape)
             log_probs = log_probs.to(next(self.parameters()).device)
             active_beams = torch.ones((batch_size, self.n_beams), dtype=torch.bool)
             active_beams = active_beams.to(next(self.parameters()).device)
@@ -312,12 +319,16 @@ class Transformer(nn.Module):
                 decoder_output = self.positional_embedding(y_embedding)
                 decoder_output = self.dropout(decoder_output)
                 # print("decoder_output.shape", decoder_output.shape)
+                i = 0
                 for decoder in self.decoders:
+                    #print("decoder", i)
+                    i+=1
                     # print("decoder_output.shape (input):", decoder_output.shape)
                     # print("x_remaining.shape:", x_remaining.shape)
                     # print("tgt_padding_mask.shape:", tgt_padding_mask.shape)
                     # print("src_padding_mask[remaining_batches].view(-1, *x_remaining.shape[2:]).shape:",
                     #       src_padding_mask[remaining_batches].view(-1, *x_remaining.shape[2:]).shape)
+                    
                     decoder_output = decoder(
                         decoder_output,
                         x_remaining,
@@ -327,12 +338,12 @@ class Transformer(nn.Module):
                 # print("---------------------------------------------------------")
                 # print("decoder_output[:, -1].shape:", decoder_output[:, -1].shape)
                 next_token = self.ff_output(decoder_output[:, -1])
-                print("next_token.shape:", next_token.shape)
+                #print("next_token.shape:", next_token.shape)
                 token_logprobs = F.log_softmax(next_token)
-                print("token_logprobs.shape:", token_logprobs.shape)
+                #print("token_logprobs.shape:", token_logprobs.shape)
                 token_logprobs = token_logprobs.reshape(x_enc.shape[0], self.n_beams, -1)
-                print(token_logprobs.shape)
-                print("max token_logprobs per beam:", token_logprobs.max(dim=-1).values)
+                #print(token_logprobs.shape)
+                #print("max token_logprobs per beam:", token_logprobs.max(dim=-1).values)
         
                 #always select a finished beam 
                 token_logprobs[active_beams[remaining_batches] == False] = float('-inf') 
@@ -345,7 +356,7 @@ class Transformer(nn.Module):
                 topk_vals, topk_indices = torch.topk(flat_token_logprobs, k=self.n_beams, dim=-1)
 
                 log_probs[remaining_batches] = topk_vals
-                print("log_probs cumulative", log_probs)
+                #print("log_probs cumulative", log_probs)
                 # Map flat indices back to (beam, token) pairs
                 beam_indices = topk_indices // self.vocab_size
                 token_indices = topk_indices % self.vocab_size
@@ -380,7 +391,8 @@ class Transformer(nn.Module):
             num_pad = (y == self.pad_token_id).sum(dim=-1)
             normalized_lengths = (lengths - num_pad).clamp(min=1)
             log_probs = log_probs / (normalized_lengths.float() ** self.alpha)
-            print("normalized log_probs", log_probs)
+            #print("normalized log_probs", log_probs)
+
                 
             return y
 
@@ -490,6 +502,8 @@ if __name__ == "__main__":
         N=N,
         seq_len=seq_len,
     )
+    num_params = sum(p.numel() for p in transformer.parameters())
+    print("Number of parameters in Transformer:", num_params)
 
     transformer.eval()
 
@@ -503,7 +517,7 @@ if __name__ == "__main__":
     bpe_tokenizer = BytePairEncoding.from_file("/home/mcvjetko/phd/projects/transformer/experiments/en-hr-tokenizers/tokenizer_37000.json")
     
 
-    raw = "He will translate sentences correctly, as long as the text is short."
+    raw =  "Once upon a midnight dreary, while I pondered weak and weary over many a quaint and curious volume of forgotten lore."
     text = bpe_tokenizer.tokenize(raw, max_length=256, add_special=True, pad=True)
     #print("decoded", bpe_tokenizer.decode(text))
     text = torch.tensor(text).to("cuda").unsqueeze(0)
