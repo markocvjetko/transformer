@@ -78,3 +78,18 @@ Beam search implemented (transformer code needs to be cleaned, super dirty now).
 Need to refactor training script, save configs, and proper eval and document the results.
 
 train_en_hr.py currently starts from a checkpoint (HARDCODED, should be removed!)
+
+
+
+Some useful resources:
+BalkanBench - https://www.balkanbench.com/about
+Aleksa Gordic posts on training YugoGPT - https://www.linkedin.com/posts/aleksagordic_first-full-run-day-1-yugogpt-7b-going-strong-activity-7134482545018060800-cZ9f/
+This guy talking about training BalkanLLMs - https://www.linkedin.com/in/perovicmitar/
+
+
+19.05.2026.
+
+new dataset - https://www.clarin.si/repository/xmlui/handle/11356/1814
+    - needs to be checked out, seems big and good
+eval_en_hr.py script works, getting a bleu score. - current model has a low score, 1.8 BLEU
+current Translation dataset always pads input to max len because otherwise the model translate_beam_search fn crashes

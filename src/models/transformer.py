@@ -182,8 +182,8 @@ class Transformer(nn.Module):
         ):
         super().__init__()
 
-        if d_ff // n_heads != 0:
-            raise ValueError("n_heads must divide d_ff")
+        if d_model % n_heads != 0:
+            raise ValueError("n_heads must divide d_model")
 
         self.vocab_size = vocab_size
         self.seq_len = seq_len
@@ -210,6 +210,7 @@ class Transformer(nn.Module):
         #embedding layer(token_id) -> weights
         #output layer(weights) -> token
         self.ff_output.weight = self.embedding_layer_decoder.embeddings.weight
+        #self.ff_output.bias = self.embedding_layer_decoder.embeddings.bias
         
     def forward(self, x, y):
         """

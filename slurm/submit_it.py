@@ -20,13 +20,13 @@ if __name__ == "__main__":
     parser.add_argument("--name", default="transformer")
     parser.add_argument("--account", default="imi@v100")
     parser.add_argument("--partition", default="gpu_p13")
-    parser.add_argument("--qos", default="qos_gpu-dev",
+    parser.add_argument("--qos", default="qos_gpu-t3",
                         help="qos_gpu-t3 (≤20h), qos_gpu-t4 (≤100h), qos_gpu-dev (≤2h)")
     parser.add_argument("--constraint", default="v100-32g",
                         help="e.g. v100-32g, v100-16g")
     parser.add_argument("--cpus-per-task", type=int, default=10)
-    parser.add_argument("--gpus", type=int, default=1)
-    parser.add_argument("--timeout-min", type=int, default=1 * 60 + 59)
+    parser.add_argument("--gpus", type=int, default=4)
+    parser.add_argument("--timeout-min", type=int, default=19 * 60 + 59)
     parser.add_argument("--log-subdir", default="submitit")
     args = parser.parse_args()
 
@@ -75,16 +75,13 @@ if __name__ == "__main__":
             "export TRANSFORMERS_OFFLINE=1",
             "export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH",
             "export DATA_DIR=${" + root + "}/proj/transformer/data",
-            "export EXPERIMENTS_DIR=${SCRATCH}/proj/transformer/experiments",
-            #"export HF_HOME=${WORK}/.cache/huggingface",
+            "export EXPERIMENTS_DIR=${" + root + "}/proj/transformer/experiments",
+            "export HF_HOME=${SCRATCH}/.cache/huggingface",
+            "export TMPDIR=${JOBSCRATCH:-$SCRATCH/tmp}",
             "export ON_JZ=TRUE",
             f"export GIT_HASH={git_hash}",
             f"export PYTHONPATH={snapshot}:$PYTHONPATH",
             "mkdir -p $DATA_DIR $EXPERIMENTS_DIR",
-            # ENOSPC fix: stripe checkpoints across 4 OSTs to avoid hitting the per-OST
-            # project quota (default JZ stripe_count=1 binds files to a single OST).
-            # No-op (and exits non-zero) if dir is already populated; that's fine.
-            "lfs setstripe -c 4 $EXPERIMENTS_DIR 2>/dev/null || true",
         ],
     )
 

@@ -26,6 +26,14 @@ export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 
+# ENOSPC fix: JZ compute /tmp is a 150 MB tmpfs. Anything in the Python stack
+# (torch.save, fsspec autocommit=False, wandb, HF datasets, etc.) that uses
+# tempfile.mkstemp() lands there and can ENOSPC mid-checkpoint even though
+# the destination filesystem has space. Redirect to JOBSCRATCH (per-job
+# Lustre scratch) so temp writes have terabytes of room.
+export TMPDIR=${JOBSCRATCH:-$SCRATCH/tmp}
+mkdir -p "$TMPDIR"
+
 # ── Environment ──────────────────────────────────────────────────────
 module purge
 module load python/3.11.5

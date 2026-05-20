@@ -34,7 +34,7 @@ def main():
         "tgt_lang": "hr",
 
         "check_val_every_n_epoch": 1,
-        "max_epochs": 3,
+        "max_epochs": 200,
         "num_workers": 10,
         "early_stopping_patience": 5,
     }
@@ -60,7 +60,6 @@ def main():
     print(opus["train"]["translation"])
     print(jwl["train"])
     print(hrenwac.data[0].keys())
-
     ds_train = ConcatDataset([opus["train"]["translation"], jwl["train"], hrenwac])
     ds_val = ConcatDataset([opus["validation"]["translation"]])
     print(len(ds_train))
@@ -126,8 +125,6 @@ def main():
         devices=-1,        # or just devices=-1
         num_nodes=1,
         strategy="ddp",
-        limit_train_batches=5, 
-        limit_val_batches=5,
         log_every_n_steps=100,    
         check_val_every_n_epoch=config["check_val_every_n_epoch"],
         callbacks=[
@@ -149,7 +146,8 @@ def main():
         ],
     )
     try:
-        trainer.fit(lit_model, dataloader_train, dataloader_val)
+        trainer.fit(lit_model, dataloader_train, dataloader_val) 
+        #ckpt_path=paths.EXPERIMENTS_DIR / "en-hr/last.ckpt")
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
         run = wandb.run
@@ -157,22 +155,6 @@ def main():
             wandb.Api().run(f"{run.entity}/{run.project}/{run.id}").delete()
         raise
     except OSError as e:
-        if e.errno == 28:
-            import subprocess
-            save_dir = config["save_dir"]
-            print(f"=== ENOSPC during training. Capturing filesystem state for {save_dir} ===", flush=True)
-            for cmd in [
-                ["ls", "-la", str(save_dir)],
-                ["lfs", "quota", "-h", "-u", os.environ["USER"], str(save_dir)],
-                ["lfs", "quota", "-h", "-g", "imi", str(save_dir)],
-                ["df", "-h", "/tmp", str(save_dir)],
-                # ENOSPC fix: stripe layout — if stripe_count is 1, the file was bound
-                # to a single OST and ENOSPC is likely a per-OST project quota hit.
-                ["lfs", "getstripe", "-d", str(save_dir)],
-                ["id"],
-            ]:
-                print(f"$ {' '.join(cmd)}", flush=True)
-                subprocess.run(cmd, check=False)
         raise
     finally:
         wandb.finish()

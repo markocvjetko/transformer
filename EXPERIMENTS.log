@@ -1,0 +1,13 @@
+09.05.2026.
+
+Training a large model seemingly successfully on three english-croatian datasets.
+
+The current model translates only one way en->hr.
+
+Needs to be evaulated on some actual test sets with standard neural translation benchmarks.
+Vibe evaluation show some weakpoints:
+- empty sentences churn out bible text (empty strings not in dataset)
+- model cannot handle multi-sentence text at all (probably never in dataset)
+- model is decent gramatically but lacks vocabulary.
+- all caps performance degrades drastically. Model also sensitive to capitalized words (e.g. bible, Bible)
+
