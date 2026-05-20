@@ -14,6 +14,10 @@ sync:
         - "**/*.ckpt"
         - "**/*.pt"
         - "**/*.pyc"
-  transformer:
+  transformer-jz:
     alpha: "."
     beta: "jz:/lustre/fswork/projects/rech/imi/uix29qp/proj/transformer"   # ← fix this path
+  transformer-adastra:
+    alpha: "."
+    beta: "adastra:/lus/work/CT10/iso1996/mcvjetko/proj/transformer"
+    
