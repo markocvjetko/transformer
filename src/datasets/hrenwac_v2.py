@@ -6,10 +6,6 @@ from torch.utils.data import Dataset
 from lxml import etree
 import langid
 
-# tree = etree.parse(paths.DATA_DIR / "hrenwac_v2.0.tmx/zvjezdice.hr.tmx")
-XML = "{http://www.w3.org/XML/1998/namespace}"
-
-
 class HrenWac(Dataset):
     def __init__(self, path):
         with open(path, "r") as f:
@@ -23,45 +19,6 @@ class HrenWac(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
-# class HrenWac():
-
-#     def __init__(self, path):
-#         self.path = path
-#         # Tolerant parser: recover from malformed XML (e.g. stray '&' in TMX).
-#         # Also keep it safe: don't resolve entities or access network.
-
-#         self.XML = "{http://www.w3.org/XML/1998/namespace}"
-#         self.dataset = self._load_data()
-
-#     def _load_data(self):
-#         folder = Path(self.path)
-#         tmx_files = list(folder.glob("*.tmx"))
-        
-#         dataset = list()
-        
-#         for file in tmx_files:
-#             try:
-#                 dataset.extend(self._read_tmx_file(file))
-#             except Exception as e:
-#                 print(f"Failed to read {file}: {e}")
-       
-#         return dataset
-
-#     def _read_tmx_file(self, file):
-#         print("parsing file:", file)
-#         data = list()
-#         tree = etree.parse(file)
-
-        
-#         for tu in tree.iterfind(".//tu"):
-#             row = dict()
-#             for tuv in tu.findall("tuv"):
-#                 lang = tuv.get(f"{self.XML}lang")
-#                 seg = tuv.findtext("seg")
-#                 row[lang] = seg
-#             data.append(row)
-
-#         return data
 
 def parse_hrenwac_tmx(path):
 
