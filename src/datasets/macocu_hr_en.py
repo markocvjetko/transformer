@@ -19,7 +19,7 @@ def parse_macocu_tmx(input_path, output_path):
     counter = 0
     with open(output_path, "a") as out:
         for _, tu in tqdm(context):
-            
+
             row = {}
             for tuv in tu.findall("tuv"):
                 lang = tuv.get(f"{XML}lang")
@@ -32,17 +32,18 @@ def parse_macocu_tmx(input_path, output_path):
             counter += 1
             if counter % 100000 == 0:
                 print(counter)
-                out.write("\n".join(json.dumps(e, ensure_ascii=False) for e in data) + "\n")
+                out.write(
+                    "\n".join(json.dumps(e, ensure_ascii=False) for e in data) + "\n"
+                )
                 out.flush()
                 data = []
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     from src.utils import paths
     import time
 
-
     dataset = parse_macocu_tmx(
         input_path=paths.DATA_DIR / "MaCoCu-hr-en.tmx",
-        output_path=paths.DATA_DIR / "macocu")
-    
+        output_path=paths.DATA_DIR / "macocu",
+    )

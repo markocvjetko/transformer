@@ -9,6 +9,7 @@ The target module must expose a `main` callable. If `main` accepts a
 `git_hash` keyword argument it will be passed; otherwise the git hash is
 available to the script via the `GIT_HASH` environment variable.
 """
+
 import argparse
 import datetime
 import importlib
@@ -68,7 +69,9 @@ def main():
     )
     subprocess.run(
         ["rsync", "-a", "--files-from=-", str(project_root) + "/", str(snapshot) + "/"],
-        input=files, text=True, check=True,
+        input=files,
+        text=True,
+        check=True,
     )
 
     executor = submitit.AutoExecutor(folder=str(run_dir / "logs" / "%j"))

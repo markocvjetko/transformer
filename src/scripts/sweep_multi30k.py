@@ -1,6 +1,7 @@
 """
 A simple hyperparameter sweep script with Optuna.
 """
+
 import json
 import os
 import subprocess
@@ -23,21 +24,21 @@ from src.utils import paths
 
 
 def objective(trial: optuna.Trial, config):
-    #suggest params,
+    # suggest params,
 
-    vocab_size_exp =  trial.suggest_int("vocab_size_exp", 8, 14)
-    vocab_size = 2 ** vocab_size_exp
-    d_model_exp = trial.suggest_int("d_model_exp", 5, 8) 
-    d_model = 2 ** d_model_exp
+    vocab_size_exp = trial.suggest_int("vocab_size_exp", 8, 14)
+    vocab_size = 2**vocab_size_exp
+    d_model_exp = trial.suggest_int("d_model_exp", 5, 8)
+    d_model = 2**d_model_exp
     d_ff_ratio = trial.suggest_int("d_ff_ration", 1, 4)
     d_ff = d_model * d_ff_ratio
 
     n_heads_exp = trial.suggest_int("n_heads", 1, 5)
-    n_heads = 2 ** n_heads_exp
+    n_heads = 2**n_heads_exp
     N = trial.suggest_int("N", 1, 6)
     lr = trial.suggest_float("lr", 10e-5, 10e-3)
     batch_size_exp = trial.suggest_int("batch_size_exp", 6, 11)
-    batch_size = 2 ** batch_size_exp
+    batch_size = 2**batch_size_exp
 
     dataset = load_from_disk(str(paths.DATA_DIR / "multi30k"))
     ds_train = dataset["train"]
@@ -47,38 +48,41 @@ def objective(trial: optuna.Trial, config):
     text_de = " ".join([example["de"] for example in ds_train])
     text = " ".join([text_en, text_de])
 
-    #train tokenizer
+    # train tokenizer
     tokenizer = BytePairEncoding(vocab_size)
     tokenizer.fit(text)
     tokenizer.save(config["sweep_root"] / str(trial.number) / "tokenizer.json")
-    
+
     dataset_train = TranslationDataset(
-        ds_train, 
+        ds_train,
         tokenizer_src=tokenizer,
         tokenizer_tgt=tokenizer,
         max_len=config["seq_len"],
-        )
+    )
 
     dataset_val = TranslationDataset(
-        ds_val, 
+        ds_val,
         tokenizer_src=tokenizer,
         tokenizer_tgt=tokenizer,
-        max_len=config["seq_len"])
+        max_len=config["seq_len"],
+    )
 
     # Minimal dataloader
     dataloader_train = DataLoader(
-        dataset_train, 
-        batch_size=batch_size, 
+        dataset_train,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=16,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn,
+    )
 
     dataloader_val = DataLoader(
-        dataset_val, 
-        batch_size=batch_size, 
+        dataset_val,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=16,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn,
+    )
 
     model = Transformer(
         vocab_size=vocab_size,
@@ -89,7 +93,7 @@ def objective(trial: optuna.Trial, config):
         N=N,
         pad_token_id=0,
         eos_token_id=2,
-        p_dropout=0.1
+        p_dropout=0.1,
     )
 
     lit_model = LitTransformer(model, lr)
@@ -97,26 +101,28 @@ def objective(trial: optuna.Trial, config):
     trainer = L.Trainer(
         accelerator="gpu",
         max_epochs=config["max_epochs"],
-        log_every_n_steps=10,    
+        log_every_n_steps=10,
         check_val_every_n_epoch=config["check_val_every_n_epoch"],
         callbacks=[
             ModelCheckpoint(
-                dirpath=config["sweep_root"] / str(trial.number), 
-                save_last=True, 
-                every_n_epochs=1, 
+                dirpath=config["sweep_root"] / str(trial.number),
+                save_last=True,
+                every_n_epochs=1,
                 save_top_k=3,
-                monitor="val_loss"),
+                monitor="val_loss",
+            ),
             EarlyStopping(monitor="val_loss", mode="min"),
-            PyTorchLightningPruningCallback(trial, monitor="val_loss")
+            PyTorchLightningPruningCallback(trial, monitor="val_loss"),
         ],
         logger=[
-            CSVLogger(save_dir=config["sweep_root"] / str(trial.number)), 
+            CSVLogger(save_dir=config["sweep_root"] / str(trial.number)),
             WandbLogger(
                 name=str(trial.number),
-                save_dir=config["sweep_root"] /str(trial.number),
+                save_dir=config["sweep_root"] / str(trial.number),
                 project=config["sweep_name"],
-                offline=True)
-            #TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
+                offline=True,
+            ),
+            # TensorBoardLogger(save_dir=config["sweep_root"] / str(trial.number))
         ],
     )
     try:
@@ -126,9 +132,10 @@ def objective(trial: optuna.Trial, config):
         raise optuna.TrialPruned()
     finally:
         wandb.finish()
-        
+
     return trainer.callback_metrics["val_loss"].item()
-    
+
+
 def main(git_hash: str):
     config = {
         "sweep_name": "multi30k",
@@ -147,7 +154,9 @@ def main(git_hash: str):
         json.dump(config, f, default=str)
 
     storage = optuna.storages.JournalStorage(
-        optuna.storages.journal.JournalFileBackend(str(config["sweep_root"] / "optuna.log"))
+        optuna.storages.journal.JournalFileBackend(
+            str(config["sweep_root"] / "optuna.log")
+        )
     )
     study = optuna.create_study(
         study_name="multi30k_test",
@@ -156,7 +165,9 @@ def main(git_hash: str):
         pruner=optuna.pruners.MedianPruner(n_startup_trials=20),
         load_if_exists=True,
     )
-    study.optimize(partial(objective, config=config), n_trials=100, timeout=None, n_jobs=1)
+    study.optimize(
+        partial(objective, config=config), n_trials=100, timeout=None, n_jobs=1
+    )
 
 
 if __name__ == "__main__":

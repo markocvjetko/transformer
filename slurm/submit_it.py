@@ -20,10 +20,14 @@ if __name__ == "__main__":
     parser.add_argument("--name", default="transformer")
     parser.add_argument("--account", default="imi@v100")
     parser.add_argument("--partition", default="gpu_p13")
-    parser.add_argument("--qos", default="qos_gpu-t3",
-                        help="qos_gpu-t3 (≤20h), qos_gpu-t4 (≤100h), qos_gpu-dev (≤2h)")
-    parser.add_argument("--constraint", default="v100-32g",
-                        help="e.g. v100-32g, v100-16g")
+    parser.add_argument(
+        "--qos",
+        default="qos_gpu-t3",
+        help="qos_gpu-t3 (≤20h), qos_gpu-t4 (≤100h), qos_gpu-dev (≤2h)",
+    )
+    parser.add_argument(
+        "--constraint", default="v100-32g", help="e.g. v100-32g, v100-16g"
+    )
     parser.add_argument("--cpus-per-task", type=int, default=10)
     parser.add_argument("--gpus", type=int, default=4)
     parser.add_argument("--timeout-min", type=int, default=19 * 60 + 59)
@@ -45,7 +49,9 @@ if __name__ == "__main__":
     )
     subprocess.run(
         ["rsync", "-a", "--files-from=-", str(project_root) + "/", str(snapshot) + "/"],
-        input=files, text=True, check=True,
+        input=files,
+        text=True,
+        check=True,
     )
 
     executor = submitit.AutoExecutor(folder=str(run_dir / "logs" / "%j"))
@@ -58,9 +64,9 @@ if __name__ == "__main__":
         slurm_partition=args.partition,
         slurm_qos=args.qos,
         slurm_gres=f"gpu:{args.gpus}",
-        tasks_per_node=args.gpus,                  
-        cpus_per_task=args.cpus_per_task,      
-        nodes=1,                                   
+        tasks_per_node=args.gpus,
+        cpus_per_task=args.cpus_per_task,
+        nodes=1,
         timeout_min=args.timeout_min,
         slurm_additional_parameters=slurm_extra,
         slurm_setup=[

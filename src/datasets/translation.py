@@ -1,22 +1,22 @@
-from torch.utils.data import Dataset
 import torch
+from torch.utils.data import Dataset
 
 from src.tokenizers.BPE import BytePairEncoding
 
-class TranslationDataset(Dataset):
 
+class TranslationDataset(Dataset):
     def __init__(
-        self, 
-        dataset, 
+        self,
+        dataset,
         src_lang,
         tgt_lang,
-        tokenizer_src: BytePairEncoding, 
-        tokenizer_tgt: BytePairEncoding, 
+        tokenizer_src: BytePairEncoding,
+        tokenizer_tgt: BytePairEncoding,
         max_len: int = 128,
-        pad_token = 0,
-        bos_token = 1,
-        eos_token = 2,
-        unk_token = 3
+        pad_token=0,
+        bos_token=1,
+        eos_token=2,
+        unk_token=3,
     ):
 
         self.dataset = dataset
@@ -43,12 +43,22 @@ class TranslationDataset(Dataset):
         Where src_seq_len and tgt_seq_len are the lengths of the tokenized source and target sentences,
         respectively, before any batching or padding.
         """
-        tokens_src = self.tokenizer_src.tokenize(self.dataset[idx][self.src_lang], max_length=self.max_len, add_special=True, pad=True)
-        tokens_tgt = self.tokenizer_tgt.tokenize(self.dataset[idx][self.tgt_lang], max_length=self.max_len, add_special=True, pad=True)
-        
+        tokens_src = self.tokenizer_src.tokenize(
+            self.dataset[idx][self.src_lang],
+            max_length=self.max_len,
+            add_special=True,
+            pad=True,
+        )
+        tokens_tgt = self.tokenizer_tgt.tokenize(
+            self.dataset[idx][self.tgt_lang],
+            max_length=self.max_len,
+            add_special=True,
+            pad=True,
+        )
+
         return {
             "src": torch.tensor(tokens_src, dtype=torch.long),
-            "tgt": torch.tensor(tokens_tgt, dtype=torch.long) 
+            "tgt": torch.tensor(tokens_tgt, dtype=torch.long),
         }
 
 
@@ -56,8 +66,12 @@ def collate_fn(batch, pad_token=0):
     src_tensors = [item["src"] for item in batch]
     tgt_tensors = [item["tgt"] for item in batch]
 
-    src_padded = torch.nn.utils.rnn.pad_sequence(src_tensors, batch_first=True, padding_value=pad_token)
-    tgt_padded = torch.nn.utils.rnn.pad_sequence(tgt_tensors, batch_first=True, padding_value=pad_token)
+    src_padded = torch.nn.utils.rnn.pad_sequence(
+        src_tensors, batch_first=True, padding_value=pad_token
+    )
+    tgt_padded = torch.nn.utils.rnn.pad_sequence(
+        tgt_tensors, batch_first=True, padding_value=pad_token
+    )
     print(src_padded.shape)
     print(tgt_padded.shape)
 

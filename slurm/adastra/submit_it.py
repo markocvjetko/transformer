@@ -31,8 +31,12 @@ if __name__ == "__main__":
     parser.add_argument("--constraint", default="MI250")
     parser.add_argument("--nodes", type=int, default=1)
     parser.add_argument("--exclusive", action="store_true", default=True)
-    parser.add_argument("--timeout-min", type=int, default=60,
-                        help="time in minutes, e.g. 60 for 1:00:00")
+    parser.add_argument(
+        "--timeout-min",
+        type=int,
+        default=60,
+        help="time in minutes, e.g. 60 for 1:00:00",
+    )
     parser.add_argument("--ntasks-per-node", type=int, default=8)
     parser.add_argument("--cpus-per-task", type=int, default=8)
     parser.add_argument("--gpus-per-task", type=int, default=1)
@@ -54,7 +58,9 @@ if __name__ == "__main__":
     )
     subprocess.run(
         ["rsync", "-a", "--files-from=-", str(project_root) + "/", str(snapshot) + "/"],
-        input=files, text=True, check=True,
+        input=files,
+        text=True,
+        check=True,
     )
 
     executor = submitit.AutoExecutor(folder=str(run_dir / "logs" / "%j"))

@@ -9,11 +9,11 @@ import submitit
 
 def _entry():
     from src.scripts.train_hr_en import main
+
     return main()
 
 
 if __name__ == "__main__":
-
 
     root = "SCRATCH"
     project_root = Path(__file__).resolve().parent.parent
@@ -30,7 +30,9 @@ if __name__ == "__main__":
     )
     subprocess.run(
         ["rsync", "-a", "--files-from=-", str(project_root) + "/", str(snapshot) + "/"],
-        input=files, text=True, check=True,
+        input=files,
+        text=True,
+        check=True,
     )
 
     executor = submitit.AutoExecutor(folder=str(run_dir / "logs" / "%j"))
