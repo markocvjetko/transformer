@@ -1,22 +1,18 @@
-import subprocess
-
-
 from dataclasses import dataclass
 
-from datasets import load_dataset
 import lightning as L
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
-from torch import optim, nn
 from torch.utils.data import DataLoader
 
-from src.models.transformer import Transformer
+from datasets import load_dataset
 from src.datasets.translation import TranslationDataset, collate_fn
+from src.models.transformer import Transformer
 from src.tokenizers.BPE import BytePairEncoding
-from src.train.utils.git_callback import GitCallback
 from src.utils import paths
-
-
 
 
 @dataclass
@@ -42,69 +38,69 @@ class Args:
 
 
 class LitTransformer(L.LightningModule):
-    def __init__(self, transformer, lr=1e-3):
+    def __init__(self, transformer, optim="adamw", lr=3e-4, weight_decay=0.01):
         super().__init__()
         self.transformer = transformer
+        self.optim = optim
         self.lr = lr
+        self.weight_decay = 0.1
         self.save_hyperparameters(ignore=["transformer"])
 
-
     def training_step(self, batch, batch_idx):
-        # training_step defines the train loop.
-        # it is independent of forward
         input_seq, target_seq = batch
 
-        decoder_input = target_seq[:, :-1]   # All but last token
-        target_labels = target_seq[:, 1:]    # All but first token (shifted)
-        
-        outputs = self.transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
+        decoder_input = target_seq[:, :-1]  # All but last token
+        target_labels = target_seq[:, 1:]  # All but first token (shifted)
 
-            #loss = criterion(outputs.view(-1, vocab_size), target_labels.reshape(-1))
-            
-        loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
+        outputs = self.transformer(
+            input_seq, decoder_input
+        )  # (batch, seq_len-1, vocab_size)
+
+        loss = nn.functional.cross_entropy(
+            outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1)
+        )
         # Logging to TensorBoard (if installed) by defaultexperiment_name
         self.log("train_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
-    
 
     def validation_step(self, batch, batch_idx):
         # this is the validation loop
         input_seq, target_seq = batch
 
-        decoder_input = target_seq[:, :-1]   # All but last token
-        target_labels = target_seq[:, 1:]    # All but first token (shifted)
-        
-        outputs = self.transformer(input_seq, decoder_input)  # (batch, seq_len-1, vocab_size)
-        loss = nn.functional.cross_entropy(outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1))
+        decoder_input = target_seq[:, :-1]  # All but last token
+        target_labels = target_seq[:, 1:]  # All but first token (shifted)
+
+        outputs = self.transformer(
+            input_seq, decoder_input
+        )  # (batch, seq_len-1, vocab_size)
+        loss = nn.functional.cross_entropy(
+            outputs.view(-1, self.transformer.vocab_size), target_labels.reshape(-1)
+        )
         # Logging to TensorBoard (if installed) by default
         self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True)
         return loss
-
-    # def validation_step(self, batch, batch_idx):
-    #     # this is the validation loop
-    #     input_seq, target_seq = batch
-    #     generated = self.model.translate(input_seq)
-    #     self._val_preds
-
 
     def test_step(self, batch, batch_idx):
         pass
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.lr)
-        return optimizer
+        if self.optim == "adamw":
+            optimizer = optim.AdamW(
+                self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+            )
+        elif self.optim == "muon":
+            raise NotImplementedError("Muon optimizer is not yet supported.")
 
-        
+        else:
+            raise ValueError(f"Unsupported optimizer: {self.optim}")
+        return optimizer
 
 
 if __name__ == "__main__":
-
-
     args = Args()
 
     print(args.experiment_name)
     experiment_root = paths.EXPERIMENTS_DIR / args.experiment_name
-
 
     # Load from cached local files if they exist, else download and save to data/multi30k
     hf_dataset = load_dataset("bentrevett/multi30k", cache_dir=paths.DATA_DIR)
@@ -116,34 +112,36 @@ if __name__ == "__main__":
     tokenizer_tgt = BytePairEncoding.from_file(experiment_root / args.tokenizer_tgt)
 
     dataset_train = TranslationDataset(
-        hf_ds_train,#.select(range(batch_size)), 
+        hf_ds_train,  # .select(range(batch_size)),
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
         max_len=args.seq_len,
-        )
+    )
 
     dataset_val = TranslationDataset(
-        hf_ds_val, 
+        hf_ds_val,
         tokenizer_src=tokenizer_src,
         tokenizer_tgt=tokenizer_tgt,
-        max_len=args.seq_len)
+        max_len=args.seq_len,
+    )
 
     # Minimal dataloader
     dataloader_train = DataLoader(
-        dataset_train, 
-        batch_size=args.batch_size, 
+        dataset_train,
+        batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        collate_fn=collate_fn)
+        collate_fn=collate_fn,
+    )
 
     dataloader_val = DataLoader(
-        dataset_val, 
-        batch_size=args.batch_size, 
+        dataset_val,
+        batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
-        collate_fn=collate_fn, 
-        drop_last=False)
-
+        collate_fn=collate_fn,
+        drop_last=False,
+    )
 
     model = Transformer(
         vocab_size=args.vocab_size,
@@ -160,14 +158,18 @@ if __name__ == "__main__":
     lit_model = LitTransformer(model)
 
     trainer = L.Trainer(
-    max_epochs=args.max_epochs,
-    check_val_every_n_epoch=10,
-    callbacks=[        
-        GitCallback(experiment_root),
-        ModelCheckpoint(dirpath=experiment_root, save_last=True, ),
-        EarlyStopping(monitor="val_loss", mode="min", patience=args.early_stopping_patience)],
-    logger=[CSVLogger(save_dir=experiment_root)],
-    
+        max_epochs=args.max_epochs,
+        check_val_every_n_epoch=10,
+        callbacks=[
+            ModelCheckpoint(
+                dirpath=experiment_root,
+                save_last=True,
+            ),
+            EarlyStopping(
+                monitor="val_loss", mode="min", patience=args.early_stopping_patience
+            ),
+        ],
+        logger=[CSVLogger(save_dir=experiment_root)],
     )
 
     trainer.fit(lit_model, dataloader_train, dataloader_val)
