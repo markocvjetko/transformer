@@ -9,6 +9,7 @@ sync:
         - "wandb/"
         - "logs/"
         - ".venv/"
+        - ".env"
         - "__pycache__/"
         - "*.egg-info/"
         - "**/*.ckpt"
