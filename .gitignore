@@ -44,6 +44,8 @@ logs/
 outputs/
 wandb/
 mlruns/
+log_test/
+resources/ 
 
 # -----------------------------
 # Model weights / exports

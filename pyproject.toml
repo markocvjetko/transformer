@@ -23,8 +23,13 @@ dependencies = [
     "translate-toolkit",
     "lxml",
     "langid",
-    "python-dotenv"
+    "python-dotenv",
+    "docling"
+
 ]
+
+[project.optional-dependencies]
+dev = ["ruff"]
 
 [build-system]
 requires = ["hatchling>=1.26"]
@@ -32,3 +37,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

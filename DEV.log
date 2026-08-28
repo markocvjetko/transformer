@@ -93,3 +93,105 @@ new dataset - https://www.clarin.si/repository/xmlui/handle/11356/1814
     - needs to be checked out, seems big and good
 eval_en_hr.py script works, getting a bleu score. - current model has a low score, 1.8 BLEU
 current Translation dataset always pads input to max len because otherwise the model translate_beam_search fn crashes
+
+
+23.05.2026.
+
+Current state of Croatian datasets:
+- hrwac - 1.3B word dataset of scraped websites - https://www.clarin.si/repository/xmlui/handle/11356/1814
+    - quality unclear, to check if sentences are well ordered and suited for training large context BalkanLLMs
+- fhrwac - filtered version of hrwac - https://takelab.fer.hr/data/fhrwac/
+- large book dataset - various formats, need to figure out how to clean it properly. 
+- Fineweb2 - https://huggingface.co/datasets/HuggingFaceFW/fineweb-2
+- macocu - https://huggingface.co/datasets/petricevich/macocu-hr-v2.0
+- Classla - https://www.clarin.si/repository/xmlui/handle/11356/2079
+-
+Check claude comments on what is the relationship between these datasets.
+
+25.05.2026.
+- data deduplicaiton presentation, references methods i can use:
+    - https://www.youtube.com/watch?v=QZLxis-p8yE
+
+
+25.05.2026.
+- data deduplicaiton presentation, references methods i can use:
+    - https://www.youtube.com/watch?v=QZLxis-p8yE
+
+
+30.05.2026.
+- Figuring out the submit script
+
+Args: main script, script args, cluster config args
+What should it do:
+- save git hash,
+- save code snapshot
+- create a repo with a slurm_id-hash-randomname
+- pass RUN_DIR as env-var to the script
+
+
+31.05.2026.
+
+https://www.youtube.com/watch?v=T3wMPmWa1qo&list=PLD80i8An1OEGqqXeNZ5w0IBmeZcxpZEYL&index=3
+
+Chinchilla paper (discusses tradeoff between model size and dataset size in terms of
+optimal compute)
+
+LLama paper: deliberately trains small model since it is easier to finetune and use
+(less systems design needed).
+
+selecting training dataset >> selecting a curriculum
+(i.e. 70% web, 15% wikipedia, 15% code)
+
+Seeing the same sentences multiple times has diminishing returns.
+Deduplication seems to help but not super clear.
+
+---
+
+The project is now getting to the point where tracking tasks is getting harder. I'm working
+on pretraining a GPT2-like LLM with croatian and english data. There is several things to consider,
+
+
+Evaluation:
+- what am I evaluating the model on? 
+    - There seem to be machine translated benchmarks such as ARC, mlmm. 
+    I will evaluate the model both on croatian and english benchmarks
+
+Training task:
+    - language modelling + translaton? or just language modeling
+    - how do I build training batches?
+
+Data:
+- what datasets to include?
+    - standard english datasets (high quality common crawl, coding, wikipedia)
+    - croatian datasets (from bertić and custom croatian books)
+    - croatian/english sentence pairs.
+
+- does the data need to be preprocessed further?
+- What ratio of each dataset to include in the run?
+
+Tokenization:
+    - how to train the tokenizer, which tokenizer to select?    
+
+Model:
+- what model size? This should probably be decided from the chinchilla paper.
+
+
+higher-level plan:
+    - train a few smaller models (e.g. 128M) with different hparams to see which one
+    does best. Then train a large model.
+
+
+04.06.2026.
+
+Translation standard benchmark:
+- flores-200
+
+Relevant paper on evaluating llms on croatian, and list of datasets:
+https://archive.ceciis.foi.hr/public/conferences/2024/Proceedings/S6/S6P3.pdf
+https://acl-bg.org/proceedings/2024/NeTTT%202024/pdf/2024.nettt-1.17.pdf
+https://arxiv.org/abs/2410.08928
+https://euroeval.com/datasets/croatian
+https://arxiv.org/abs/2506.19468
+
+18.06.2026.
+gpt2 basic train loop seems to work, needs more testing

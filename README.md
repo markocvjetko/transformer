@@ -9,4 +9,7 @@ There is currently a working implementation of the original *Attention is All Yo
 As of writing this, I have trained a first model on a combination of a few croatian-english sentence-pairs. Currently working on properly evaluating this model,
 and working on implementing a GPT-2-like architecture, to train a croatian-english bilingual model.
 
-More to come...
+
+Some commands:
+
+- syncing automatically to the cluster.
