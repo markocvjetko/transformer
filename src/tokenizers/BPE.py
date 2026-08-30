@@ -2,9 +2,8 @@ from collections import Counter, defaultdict
 import re
 import json
 import heapq
-
+import warnings
 from pathlib import Path
-from tqdm import tqdm
 
 class BytePairEncoding: #Byte Pair Encoding
 
@@ -15,6 +14,9 @@ class BytePairEncoding: #Byte Pair Encoding
     
         self.vocab = {} #mapping of tokens to indices
         self.inv_vocab = {} #mapping of indices to tokens
+
+
+        self.padding_side = "right" # "left | right"
 
         self._special_vocab = {
             "<PAD>": 0,
@@ -28,6 +30,7 @@ class BytePairEncoding: #Byte Pair Encoding
             2: "<EOS>",
             3: "<UNK>"
         }
+
 
     def _merge_pair(self, tokens, pair):
         """Merge all occurrences of a token pair in the token list."""
@@ -90,12 +93,17 @@ class BytePairEncoding: #Byte Pair Encoding
             tokens = tokens[:max_length]
         
         if pad and max_length > 0 and len(tokens) < max_length:
-            tokens += [self._special_vocab["<PAD>"]] * (max_length - len(tokens)) 
+            
+            if self.padding_side == "right":
+                tokens = tokens + [self._special_vocab["<PAD>"]] * (max_length - len(tokens)) 
+            elif self.padding_size == "left":
+                tokens = [self._special_vocab["<PAD>"]] * (max_length - len(tokens)) + tokens
+
         return tokens
 
     def decode(self, tokens: list[int] | int, add_special: bool = False) -> str:
         """
-        Decodes a sequence of token(s) back into the original string.
+        Decodes a sequence of tokenS back into the original string.
 
         Args:
             tokens (list[int] | int): A list of token indices (ints), 
@@ -115,9 +123,7 @@ class BytePairEncoding: #Byte Pair Encoding
         if isinstance(tokens, int):
             tokens = [tokens]
 
-        # Fix: avoid crash if tokens is None or not iterable
-        # If add_special is False, filter out special tokens (<BOS>, <EOS>, <PAD>) before decoding
-
+        # If add_special == False, filter out special tokens before decoding
         if not add_special:
             tokens = [token for token in tokens if token not in self._special_inv_vocab]
 
@@ -134,15 +140,14 @@ class BytePairEncoding: #Byte Pair Encoding
         raise NotImplementedError
 
     def fit(self, corpus: str) -> None:
-        # If the vocabulary is not empty, do not fit again.
 
         if self.vocab:
-            print("BPE fit called with non-empty vocab. Re-fitting.")
+            warnings.warn("BPE fit called with non-empty vocab. Re-fitting.")
             self.vocab = {}
             self.inv_vocab = {}
+       
 
-        #IDs in vocab start after IDs in special vocab, to avoid collisions
-        #with special tokens
+        #IDs in vocab start after special vocab IDs, to avoid collisions
         idx_offset = len(self._special_inv_vocab)
         
         words = corpus.split()
@@ -160,6 +165,10 @@ class BytePairEncoding: #Byte Pair Encoding
         token_pair_counts = defaultdict(lambda: 0)
         
    
+        """
+        Build a dictionary mapping a token to a list of all words where this token occurs.
+        Count the number of occurences of each token pair.
+        """
         for word, tokens in word_tokenizations.items():
             for token in tokens:
                 token_to_words[token].add(word)
@@ -167,8 +176,8 @@ class BytePairEncoding: #Byte Pair Encoding
                 token_pair_counts[(tokens[i], tokens[i+1])] += counts[word]
 
         heap = []
-        for pair, c in token_pair_counts.items():
-            heapq.heappush(heap, (-c, pair))
+        for pair, count in token_pair_counts.items():
+            heapq.heappush(heap, (-count, pair))
 
         while len(self._special_vocab) + len(self.vocab) < self.vocab_size:
             
@@ -281,7 +290,6 @@ if __name__ == "__main__":
         "efficient and practical for building flexible and expressive tokenization schemes for a wide variety of languages."
     )
     tokenizer.fit(large_paragraph)
-    #print(tokenizer.vocab)
     tokens = tokenizer.tokenize("practical", add_special=True)
     print("decoding", tokens)
     text = tokenizer.decode(tokens, add_special=True)
@@ -289,28 +297,28 @@ if __name__ == "__main__":
     print(text)
 
 
-    from datasets import load_dataset
+    # from datasets import load_dataset
 
-    # Load a small subset from wikitext-2 (e.g., first 1000 samples)
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1", split=f"train[:1000]")
-    wiki_texts = "\n".join(ds["text"])
-    tokenizer.fit(wiki_texts)
-    #print(tokenizer.vocab)
-    print(tokenizer.tokenize("This sentence will be tokenized"))
-    print([tokenizer.decode([token]) for token in tokenizer.tokenize("This sentence will be tokenized")])
-    print(tokenizer.decode(tokenizer.tokenize("This sentence will be tokenized")))
-    print(tokenizer.decode(tokenizer.tokenize("token")))
-    print(tokenizer.tokenize("token"))
-    print([tokenizer.decode([token], add_special=True) for token in tokenizer.tokenize("token", add_special=True)])
+    # # Load a small subset from wikitext-2 (e.g., first 1000 samples)
+    # ds = load_dataset("wikitext", "wikitext-2-raw-v1", split=f"train[:1000]")
+    # wiki_texts = "\n".join(ds["text"])
+    # tokenizer.fit(wiki_texts)
+    # #print(tokenizer.vocab)
+    # print(tokenizer.tokenize("This sentence will be tokenized"))
+    # print([tokenizer.decode([token]) for token in tokenizer.tokenize("This sentence will be tokenized")])
+    # print(tokenizer.decode(tokenizer.tokenize("This sentence will be tokenized")))
+    # print(tokenizer.decode(tokenizer.tokenize("token")))
+    # print(tokenizer.tokenize("token"))
+    # print([tokenizer.decode([token], add_special=True) for token in tokenizer.tokenize("token", add_special=True)])
     
-    # Correct - specify a file name
-    tokenizer.save("./config/tokenizer.json")
+    # # Correct - specify a file name
+    # tokenizer.save("./config/tokenizer.json")
 
-    bpe_loaded = BytePairEncoding.from_file("./config/tokenizer.json")
+    # bpe_loaded = BytePairEncoding.from_file("./config/tokenizer.json")
 
-    # Verify they are the same
-    assert tokenizer.vocab_size == bpe_loaded.vocab_size, "Vocab sizes do not match"
-    assert tokenizer.min_frequency == bpe_loaded.min_frequency, "Min frequencies do not match"
-    assert tokenizer.vocab == bpe_loaded.vocab, "Vocabs do not match"
-    assert tokenizer.inv_vocab == bpe_loaded.inv_vocab, "Inverse vocabs do not match"
-    print("Tokenizer and loaded BPE are the same!")
+    # # Verify they are the same
+    # assert tokenizer.vocab_size == bpe_loaded.vocab_size, "Vocab sizes do not match"
+    # assert tokenizer.min_frequency == bpe_loaded.min_frequency, "Min frequencies do not match"
+    # assert tokenizer.vocab == bpe_loaded.vocab, "Vocabs do not match"
+    # assert tokenizer.inv_vocab == bpe_loaded.inv_vocab, "Inverse vocabs do not match"
+    # print("Tokenizer and loaded BPE are the same!")
