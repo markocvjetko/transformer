@@ -13,7 +13,14 @@ class CharBytePairEncoding:
     not byte-level BPE.
     """
 
-    def __init__(self, vocab_size=100, min_frequency=2, min_char_frequency=100):
+    def __init__(
+        self,
+        vocab_size=100,
+        min_frequency=2,
+        min_char_frequency=100,
+        use_cache=True,
+        cache_size=1_000_000,
+    ):
 
         self.vocab_size = vocab_size
         self.min_frequency = min_frequency
@@ -36,6 +43,10 @@ class CharBytePairEncoding:
             3: "<UNK>",
         }
 
+        self.use_cache = use_cache
+        self._cache_size = cache_size
+        self._cache = {}
+
     def _merge_pair(self, tokens, pair):
         """Merge all occurrences of a token pair in the token list."""
         merged = []
@@ -56,6 +67,9 @@ class CharBytePairEncoding:
 
     def _tokenize_word(self, word):
 
+        if self.use_cache and word in self._cache:
+            return self._cache[word]
+
         tokens = [ch if ch in self.vocab else None for ch in word]
 
         while len(tokens) > 1:
@@ -74,6 +88,11 @@ class CharBytePairEncoding:
             tokens = self._merge_pair(tokens, most_common)
 
         tokens = [self.vocab[token] if token is not None else self._special_vocab["<UNK>"] for token in tokens]
+
+        if self.use_cache:
+            self._cache[word] = tokens
+            if len(self._cache) > self._cache_size:
+                self._cache.clear()
 
         return tokens
 
@@ -158,6 +177,8 @@ class CharBytePairEncoding:
             warnings.warn("BPE fit called with non-empty vocab. Re-fitting.", stacklevel=2)
             self.vocab = {}
             self.inv_vocab = {}
+            if self.use_cache:
+                self._cache.clear()
 
         # IDs in vocab start after special vocab IDs, to avoid collisions
         idx_offset = len(self._special_inv_vocab)
@@ -269,14 +290,19 @@ class CharBytePairEncoding:
             json.dump(data, f, indent=4)
 
     @classmethod
-    def from_file(cls, path: str) -> "CharBytePairEncoding":
+    def from_file(cls, path: str, use_cache=True, cache_size=1_000_000) -> "CharBytePairEncoding":
 
         path = Path(path)
 
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
-        tokenizer = cls(vocab_size=data["vocab_size"], min_frequency=data["min_frequency"])
+        tokenizer = cls(
+            vocab_size=data["vocab_size"],
+            min_frequency=data["min_frequency"],
+            use_cache=use_cache,
+            cache_size=cache_size,
+        )
 
         tokenizer.vocab = data["vocab"]
         tokenizer.inv_vocab = {idx: token for token, idx in tokenizer.vocab.items()}
