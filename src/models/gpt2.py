@@ -9,7 +9,7 @@ class MultiHeadAttention(nn.Module):
     Scaled dot-product multi-head attention.
     """
 
-    def __init__(self, d_input, n_heads, dq, dk, dv, do, causal_mask, p_dropout):
+    def __init__(self, d_input, n_heads, dq, dk, dv, do, p_dropout):
         super().__init__()
         self.d_input = d_input
         self.n_heads = n_heads
@@ -17,7 +17,6 @@ class MultiHeadAttention(nn.Module):
         self.dk = dk  # these dims are placeholders
         self.dv = dv  # to check if all share the same dim
         self.do = do
-        self.causal_mask = causal_mask
         self.dropout = nn.Dropout(p_dropout)
 
         self.W_Q = nn.Linear(d_input, dq)
@@ -25,17 +24,10 @@ class MultiHeadAttention(nn.Module):
         self.W_V = nn.Linear(d_input, dv)
         self.W_O = nn.Linear(dv, do)  # Projects concatenated heads (dv) to output (do)
 
-    def forward(self, q, k, v, padding_mask=None):
-
-        Q = self.W_Q(q).view(
-            q.shape[0], q.shape[1], self.n_heads, self.dq // self.n_heads
-        )
-        K = self.W_K(k).view(
-            k.shape[0], k.shape[1], self.n_heads, self.dk // self.n_heads
-        )
-        V = self.W_V(v).view(
-            v.shape[0], v.shape[1], self.n_heads, self.dv // self.n_heads
-        )
+    def forward(self, q, k, v, causal_mask=None, padding_mask=None):
+        Q = self.W_Q(q).view(q.shape[0], q.shape[1], self.n_heads, self.dq // self.n_heads)
+        K = self.W_K(k).view(k.shape[0], k.shape[1], self.n_heads, self.dk // self.n_heads)
+        V = self.W_V(v).view(v.shape[0], v.shape[1], self.n_heads, self.dv // self.n_heads)
 
         Q = Q.transpose(1, 2)
         K = K.transpose(1, 2)
@@ -45,26 +37,15 @@ class MultiHeadAttention(nn.Module):
         attn_score /= math.sqrt(Q.shape[-1])
 
         # Apply causal mask (for decoder self-attention)
-        if self.causal_mask:
-            device = attn_score.device
-            causal = torch.triu(
-                torch.ones(
-                    (attn_score.shape[-2], attn_score.shape[-1]),
-                    dtype=torch.bool,
-                    device=device,
-                ),
-                diagonal=1,
+        if causal_mask != None:
+            attn_score = attn_score.masked_fill(
+                causal_mask[: attn_score.shape[-1], : attn_score.shape[-1]], float("-inf")
             )
-            attn_score = attn_score.masked_fill(causal, float("-inf"))
 
         # Apply key padding mask (to ignore padding tokens)
-        # print("key mask", key_padding_mask.shape)
-        # print("attn score", attn_score.shape)
         if padding_mask is not None:
             # key_padding_mask: (batch, key_len) -> (batch, 1, 1, key_len)
-            attn_score = attn_score.masked_fill(
-                padding_mask.unsqueeze(1).unsqueeze(2), float("-inf")
-            )
+            attn_score = attn_score.masked_fill(padding_mask.unsqueeze(1).unsqueeze(2), float("-inf"))
 
         attn_weights = torch.softmax(attn_score, dim=-1)
         attn_weights = self.dropout(attn_weights)
@@ -86,9 +67,7 @@ class DecoderBlock(nn.Module):
         self.n_heads = n_heads
 
         self.ln_mha = nn.LayerNorm(d_model)
-        self.mha = MultiHeadAttention(
-            d_model, n_heads, d_model, d_model, d_model, d_model, True, p_dropout
-        )
+        self.mha = MultiHeadAttention(d_model, n_heads, d_model, d_model, d_model, d_model, p_dropout)
         self.dropout = nn.Dropout(p=p_dropout)
         self.ff = nn.Sequential(
             nn.Linear(d_model, d_ff), nn.GELU(), nn.Linear(d_ff, d_model)
@@ -96,9 +75,9 @@ class DecoderBlock(nn.Module):
 
         self.ln_ff = nn.LayerNorm(d_model)
 
-    def forward(self, x, padding_mask=None):
+    def forward(self, x, causal_mask=None, padding_mask=None):
         x_ln = self.ln_mha(x)
-        x = x + self.dropout(self.mha(x_ln, x_ln, x_ln, padding_mask=padding_mask))
+        x = x + self.dropout(self.mha(x_ln, x_ln, x_ln, causal_mask, padding_mask))
         x = x + self.dropout(self.ff(self.ln_ff(x)))
         return x
 
@@ -148,13 +127,20 @@ class GPT2(nn.Module):
         self.alpha = alpha
 
         self.embedding_layer = nn.Embedding(vocab_size, d_model)
-        self.embedding_pos = nn.Embedding(
-            seq_len, d_model
-        )  # buffer auto-moves with .to(device)
+        self.embedding_pos = nn.Embedding(seq_len, d_model)  # buffer auto-moves with .to(device)
         self.dropout = nn.Dropout(p_dropout)
-        self.decoders = nn.ModuleList(
-            [DecoderBlock(d_model, d_ff, n_heads, p_dropout) for _ in range(N)]
+        self.register_buffer(
+            "causal_mask",
+            torch.triu(
+                torch.ones(
+                    (seq_len, seq_len),
+                    dtype=torch.bool,
+                ),
+                diagonal=1,
+            ),
+            persistent=False,
         )
+        self.decoders = nn.ModuleList([DecoderBlock(d_model, d_ff, n_heads, p_dropout) for _ in range(N)])
         self.ln_final = nn.LayerNorm(d_model)
         self.ff_output = nn.Linear(d_model, vocab_size, bias=False)
 
@@ -165,13 +151,13 @@ class GPT2(nn.Module):
 
         for name, params in self.named_parameters():
             if "ff.0.weight" in name:
-                print(name)
+                # print(name)
                 nn.init.normal_(params, mean=0.0, std=0.02 / math.sqrt(2 * N))
             if "ff.2.weight" in name:
-                print(name)
+                # print(name)
                 nn.init.normal_(params, mean=0.0, std=0.02 / math.sqrt(2 * N))
             if "mha.W_O.weight" in name:
-                print(name)
+                # print(name)
                 nn.init.normal_(params, mean=0.0, std=0.02 / math.sqrt(2 * N))
 
     def _init_weights(self, module):
@@ -206,26 +192,45 @@ class GPT2(nn.Module):
 
         decoder_output = self.dropout(x)
         for decoder in self.decoders:
-            decoder_output = decoder(decoder_output, padding_mask)
+            decoder_output = decoder(decoder_output, self.causal_mask, padding_mask)
 
         return self.ff_output(self.ln_final(decoder_output))
 
+    def generate(self, x: torch.Tensor, temperature=1, seq_len=None, top_k=10, top_p=0.9):
+
+        with torch.no_grad():
+            while x.shape[-1] < seq_len:
+                logits = self(x)[:, -1, :]
+                logits *= temperature
+                probs = torch.softmax(logits, dim=-1)
+
+                # select top_k tokens per batch
+                top_k_vals, top_k_idx = torch.topk(probs, top_k, dim=-1)
+                cumsum = torch.cumsum(top_k_vals, dim=-1)
+                top_p_sums = cumsum <= top_p
+
+                cumsum = cumsum * top_p_sums
+                print(cumsum)
+                samples = torch.multinomial(cumsum, num_samples=1)
+
+                x = torch.cat((x, samples), dim=-1)
+        return x
+
 
 if __name__ == "__main__":
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transformer = GPT2(
-        vocab_size=50257,
-        N=12, 
+        vocab_size=16,
+        N=12,
         d_model=768,
-        d_ff=768*4)
+        d_ff=768 * 4,
+    ).to(device)
     num_params = sum(p.numel() for p in transformer.parameters())
     print(f"Number of parameters: {num_params}")
-    batch_size = 8
-    seq_len = 1024
 
-    x = torch.randint(low=0, high=512, size=(batch_size, seq_len))
-
+    batch_size = 2
+    seq_len = 2
+    x = torch.randint(low=1, high=16, size=(batch_size, seq_len)).to(device)
     output = transformer(x)
-
-    print("Output shape:", output.shape)
-    print("Output:", output)
+    output = transformer.generate(x, seq_len=4, temperature=1, top_p=0.5)
