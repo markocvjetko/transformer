@@ -63,3 +63,4 @@ Thumbs.db
 .vscode/
 .idea/
 mutagen.yml.lock
+mutagen.yml
