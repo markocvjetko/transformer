@@ -1,0 +1,53 @@
+project_name: en-hr
+save_dir: ${paths:EXPERIMENTS_DIR}/en-hr
+
+seq_len: 256
+vocab_size: 37000
+
+tokenizer:
+  path: ${paths:EXPERIMENTS_DIR}/en-hr-tokenizers/tokenizer_37000.json
+
+model:
+  d_model: 256
+  d_ff: 512
+  n_heads: 8
+  N: 6
+
+optimizer:
+  name: adamw
+  lr: 3.0e-4
+  weight_decay: 0.01
+
+checkpoint:
+  save_top_k: 3
+  save_last: true
+  every_n_epochs: 1
+  monitor: val_loss
+  mode: min
+
+early_stopping:
+  enabled: true
+  monitor: val_loss
+  mode: min
+  patience: 10
+
+wandb:
+  enabled: true
+  project: en-hr-translation
+  name: default
+
+trainer:
+  max_epochs: 200
+  accelerator: gpu
+  devices: -1
+  num_nodes: 1
+  strategy: ddp
+  log_every_n_steps: 100
+  check_val_every_n_epoch: 5
+  early_stopping_patience: 5
+
+dataset:
+  src_lang: en
+  tgt_lang: hr
+  num_workers: 10
+  batch_size: 2
