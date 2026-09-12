@@ -1,14 +1,7 @@
 import json
-import os
-from pathlib import Path
-from typing import Counter
-from langid.langid import LanguageIdentifier, model
-from torch.utils.data import Dataset
-from lxml import etree
-import langid
-from tqdm import tqdm
 
-from src.utils.paths import DATA_DIR
+from lxml import etree
+from tqdm import tqdm
 
 
 def parse_macocu_tmx(input_path, output_path):
@@ -39,7 +32,6 @@ def parse_macocu_tmx(input_path, output_path):
 
 if __name__=="__main__":
     from src.utils import paths
-    import time
 
 
     dataset = parse_macocu_tmx(

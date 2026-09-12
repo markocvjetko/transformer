@@ -1,7 +1,7 @@
 from datasets.table import np
 from torch.utils.data import Dataset
 
-from src.tokenizers.BPE_v2 import BytePairEncoding
+from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
 
