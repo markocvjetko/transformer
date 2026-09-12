@@ -1,34 +1,28 @@
 import heapq
 import json
 import os
+import re
 import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from src.tokenizers import pretokenizers
 
-"""
-DEV NOTE: this is an actual byte-pair encoding, the v1 (BPE.py) works on characters
+class CharBytePairEncoding:
+    """
+    Despite the name, this implementation is a character-level BPE,
+    not byte-level BPE.
+    """
 
-"""
-
-
-class BytePairEncoding:
-    def __init__(
-        self,
-        vocab_size=100,
-        min_frequency=2,
-        pretokenizer=pretokenizers.qwen38_pretokenizer,
-    ):
+    def __init__(self, vocab_size=100, min_frequency=2, min_char_frequency=100):
 
         self.vocab_size = vocab_size
         self.min_frequency = min_frequency
-        self.pretokenizer = pretokenizer
+        self.min_char_frequency = min_char_frequency
         self.padding_side = "right"  # "left | right"
 
         self.vocab = {}  # mapping of tokens to indices
         self.inv_vocab = {}  # mapping of indices to tokens
-        
+
         self._special_vocab = {
             "<PAD>": 0,
             "<BOS>": 1,
@@ -88,9 +82,8 @@ class BytePairEncoding:
         if add_special and max_length > 0 and max_length < 2:
             raise ValueError(f"max_length={max_length} is too small to fit <BOS> and <EOS>")
 
-        pretokens = self.pretokenizer(text)
-        encoded = [pretokenizers.byte_encode(pretoken) for pretoken in pretokens]
-        tokens = [token for b in encoded for token in self._tokenize_word(b)]
+        words = re.findall(r"\S+|\s+", text)  # matches non-whitespace OR whitespace
+        tokens = [token for word in words for token in self._tokenize_word(word)]
 
         if add_special:
             tokens = [self._special_vocab["<BOS>"]] + tokens + [self._special_vocab["<EOS>"]]
@@ -109,7 +102,7 @@ class BytePairEncoding:
 
     def decode(self, tokens: list[int] | int, add_special: bool = False) -> str:
         """
-        Decodes a sequence of tokens back into the original string.
+        Decodes a sequence of tokenS back into the original string.
 
         Args:
             tokens (list[int] | int): A list of token indices (ints),
@@ -133,28 +126,31 @@ class BytePairEncoding:
         if not add_special:
             tokens = [token for token in tokens if token not in self._special_inv_vocab]
 
-        detokenized = "".join(
-            [
-                self._special_inv_vocab[token]
-                if token in self._special_inv_vocab
-                else self.inv_vocab[token]
-                if token in self.inv_vocab
-                else "<UNK>"
-                for token in tokens
-            ]
+        return "".join(
+            self._special_inv_vocab[token]
+            if token in self._special_inv_vocab
+            else self.inv_vocab[token]
+            if token in self.inv_vocab
+            else "<UNK>"
+            for token in tokens
         )
 
-        return pretokenizers.byte_decode(detokenized)
+    def decode_batch():
+        # TODO how should this be done (should decode itself accept batches)
+        # An extra function seems unncessary
+        raise NotImplementedError
 
     def _build_counts(self, path: os.PathLike):
 
         from collections import Counter
 
-        word_counts = Counter()
+        word_counts, char_counts = Counter(), Counter()
         with open(path, encoding="utf-8") as f:
             for line in f:
-                word_counts.update([pretokenizers.byte_encode(pretoken) for pretoken in self.pretokenizer(line)])
-        return word_counts
+                words = line.split()
+                word_counts.update(words)
+                char_counts.update(line)
+        return word_counts, char_counts
 
     def fit(self, corpus: str | os.PathLike) -> None:
 
@@ -167,15 +163,23 @@ class BytePairEncoding:
         idx_offset = len(self._special_inv_vocab)
 
         if isinstance(corpus, str):
-            pretoken_counts = Counter([pretokenizers.byte_encode(pretoken) for pretoken in self.pretokenizer(corpus)])
+            word_counts = Counter(corpus.split())
+            char_counts = Counter(corpus)
         else:
-            pretoken_counts = self._build_counts(corpus)
+            word_counts, char_counts = self._build_counts(corpus)
 
-        for i, (_b, u) in enumerate(pretokenizers.b2u.items()):
-            self.vocab[u] = i + idx_offset
-            self.inv_vocab[i + idx_offset] = u
+        # Remove chars which appear below threshold in the corpus.
+        unique_chars = {ch for ch, n in char_counts.items() if n >= self.min_char_frequency}
+        print(f"{len(unique_chars)} unique chars found")
+        # Remove words containing removed characters
+        word_counts = Counter({w: c for w, c in word_counts.items() if unique_chars.issuperset(w)})
+        unique_chars = sorted(unique_chars)
 
-        word_tokenizations = {word: list(word) for word in pretoken_counts.keys()}
+        for i, char in enumerate(unique_chars):
+            self.vocab[char] = i + idx_offset
+            self.inv_vocab[i + idx_offset] = char
+
+        word_tokenizations = {word: list(word) for word in word_counts.keys()}
 
         # tracks which tokens are present for which words. For smart merging.
         token_to_words = defaultdict(set)
@@ -189,7 +193,7 @@ class BytePairEncoding:
             for token in tokens:
                 token_to_words[token].add(word)
             for i in range(len(tokens) - 1):
-                token_pair_counts[(tokens[i], tokens[i + 1])] += pretoken_counts[word]
+                token_pair_counts[(tokens[i], tokens[i + 1])] += word_counts[word]
 
         heap = []
         for pair, count in token_pair_counts.items():
@@ -225,11 +229,11 @@ class BytePairEncoding:
                 if new_tok == old_tok:
                     continue
                 word_tokenizations[word] = new_tok
-                w_count = pretoken_counts[word]
+                w_count = word_counts[word]
 
                 # only update pairs whose multiplicity actually changed
-                old_pairs = Counter(zip(old_tok, old_tok[1:], strict=True))
-                new_pairs = Counter(zip(new_tok, new_tok[1:], strict=True))
+                old_pairs = Counter(zip(old_tok, old_tok[1:]))
+                new_pairs = Counter(zip(new_tok, new_tok[1:]))
                 for p in old_pairs.keys() | new_pairs.keys():
                     delta = new_pairs[p] - old_pairs[p]
                     if delta:
@@ -265,7 +269,7 @@ class BytePairEncoding:
             json.dump(data, f, indent=4)
 
     @classmethod
-    def from_file(cls, path: str) -> "BytePairEncoding":
+    def from_file(cls, path: str) -> "CharBytePairEncoding":
 
         path = Path(path)
 
@@ -280,9 +284,17 @@ class BytePairEncoding:
         tokenizer._special_inv_vocab = {idx: token for token, idx in tokenizer._special_vocab.items()}
         return tokenizer
 
+    def preprocess(self, text):
+        """
+        Removes leading and trailing whitespaces.
+        Removes consecutive whitespaces.
+        WARNING! Removes tabs, new lines, etc.
+        """
+        return " ".join(text.split())
+
 
 if __name__ == "__main__":
-    tokenizer = BytePairEncoding(vocab_size=650, min_frequency=2)
+    tokenizer = CharBytePairEncoding(vocab_size=650, min_frequency=2)
     large_paragraph = (
         "Byte Pair Encoding (BPE) is a simple form of data compression in which the most frequent pair of bytes in a sequence "
         "of bytes is replaced with a byte that does not occur within that sequence. This procedure is repeated until no more "
@@ -296,11 +308,34 @@ if __name__ == "__main__":
         "(日本語) (日本語) (日本語)"
     )
     tokenizer.fit(large_paragraph)
-    tokens = tokenizer.tokenize(
-        "For example, the word 'unhappiness' could be segmented into 'un', 'happi', and 'ness', which are themselves frequent subwords.",
-        add_special=False,
-    )
+    tokens = tokenizer.tokenize("practical", add_special=True)
     print("decoding", tokens)
-    text = tokenizer.decode(tokens, add_special=False)
+    text = tokenizer.decode(tokens, add_special=True)
     print(tokens)
     print(text)
+
+    # from datasets import load_dataset
+
+    # # Load a small subset from wikitext-2 (e.g., first 1000 samples)
+    # ds = load_dataset("wikitext", "wikitext-2-raw-v1", split=f"train[:1000]")
+    # wiki_texts = "\n".join(ds["text"])
+    # tokenizer.fit(wiki_texts)
+    # #print(tokenizer.vocab)
+    # print(tokenizer.tokenize("This sentence will be tokenized"))
+    # print([tokenizer.decode([token]) for token in tokenizer.tokenize("This sentence will be tokenized")])
+    # print(tokenizer.decode(tokenizer.tokenize("This sentence will be tokenized")))
+    # print(tokenizer.decode(tokenizer.tokenize("token")))
+    # print(tokenizer.tokenize("token"))
+    # print([tokenizer.decode([token], add_special=True) for token in tokenizer.tokenize("token", add_special=True)])
+
+    # # Correct - specify a file name
+    # tokenizer.save("./config/tokenizer.json")
+
+    # bpe_loaded = BytePairEncoding.from_file("./config/tokenizer.json")
+
+    # # Verify they are the same
+    # assert tokenizer.vocab_size == bpe_loaded.vocab_size, "Vocab sizes do not match"
+    # assert tokenizer.min_frequency == bpe_loaded.min_frequency, "Min frequencies do not match"
+    # assert tokenizer.vocab == bpe_loaded.vocab, "Vocabs do not match"
+    # assert tokenizer.inv_vocab == bpe_loaded.inv_vocab, "Inverse vocabs do not match"
+    # print("Tokenizer and loaded BPE are the same!")
