@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 
-import lightning as L
 import torch.nn as nn
 import torch.optim as optim
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
+import lightning as L
 from datasets import load_dataset
 from src.datasets.next_token import NextTokenPredictionDataset
 from src.models.gpt2 import GPT2
@@ -36,8 +36,9 @@ class Args:
 
 
 class LitGPT(L.LightningModule):
-    def __init__(self, transformer, optim="adamw", lr=3e-4, weight_decay=0.01,
-        bits_per_byte=None, val_dataset_names=None):
+    def __init__(
+        self, transformer, optim="adamw", lr=3e-4, weight_decay=0.01, bits_per_byte=None, val_dataset_names=None
+    ):
         super().__init__()
         self.transformer = transformer
         self.optim = optim
@@ -46,7 +47,6 @@ class LitGPT(L.LightningModule):
         self.save_hyperparameters(ignore=["transformer"])
         self.bits_per_byte = bits_per_byte
         self.val_dataset_names = val_dataset_names
-        
 
     def training_step(self, batch, batch_idx):
         input_seq = batch[:, :-1]
@@ -55,9 +55,8 @@ class LitGPT(L.LightningModule):
         outputs = self.transformer(input_seq)
 
         loss = nn.functional.cross_entropy(
-            input=outputs.view(-1, self.transformer.vocab_size), 
-            target=target_seq.reshape(-1),
-            ignore_index=0)
+            input=outputs.view(-1, self.transformer.vocab_size), target=target_seq.reshape(-1), ignore_index=0
+        )
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
@@ -67,23 +66,26 @@ class LitGPT(L.LightningModule):
         target_seq = batch[:, 1:]
 
         outputs = self.transformer(input_seq)
-   
+
         loss = nn.functional.cross_entropy(
-            input=outputs.view(-1, self.transformer.vocab_size), 
-            target=target_seq.reshape(-1),
-            ignore_index=0)
-        
+            input=outputs.view(-1, self.transformer.vocab_size), target=target_seq.reshape(-1), ignore_index=0
+        )
+
         bpb = self.bits_per_byte(outputs, target_seq)
         # Logging to TensorBoard (if installed) by defaultexperiment_name
-        
-        #if there is self.val_dataset_names print per dataset metrics, otherwise aggregated
+
+        # if there is self.val_dataset_names print per dataset metrics, otherwise aggregated
         if self.val_dataset_names:
-            self.log(f"val_loss {self.val_dataset_names[dataloader_idx]}", loss, on_step=False, on_epoch=True, sync_dist=True)
-            self.log(f"val_bpb {self.val_dataset_names[dataloader_idx]}", bpb, on_step=False, on_epoch=True, sync_dist=True)
+            self.log(
+                f"val_loss {self.val_dataset_names[dataloader_idx]}", loss, on_step=False, on_epoch=True, sync_dist=True
+            )
+            self.log(
+                f"val_bpb {self.val_dataset_names[dataloader_idx]}", bpb, on_step=False, on_epoch=True, sync_dist=True
+            )
         else:
             self.log("val_loss", loss.mean(), on_step=False, on_epoch=True, sync_dist=True)
             self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True)
-    
+
         return loss
 
     def test_step(self, batch, batch_idx):

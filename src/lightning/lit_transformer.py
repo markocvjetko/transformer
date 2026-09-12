@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 
-import lightning as L
 import torch.nn as nn
 import torch.optim as optim
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
+import lightning as L
 from datasets import load_dataset
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.models.transformer import LitGPT

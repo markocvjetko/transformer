@@ -37,7 +37,7 @@ class MultiHeadAttention(nn.Module):
         attn_score /= math.sqrt(Q.shape[-1])
 
         # Apply causal mask (for decoder self-attention)
-        if causal_mask != None:
+        if not causal_mask:
             attn_score = attn_score.masked_fill(
                 causal_mask[: attn_score.shape[-1], : attn_score.shape[-1]], float("-inf")
             )

@@ -1,8 +1,7 @@
-from argparse import ArgumentParser
-import datetime
 import importlib
 import os
 import subprocess
+from argparse import ArgumentParser
 from pathlib import Path
 
 import submitit
@@ -22,7 +21,6 @@ def _to_module_path(s: str) -> str:
 
 
 if __name__ == "__main__":
-
     parser = ArgumentParser()
     parser.add_argument("script", help="Module path, e.g. slurm.adastra.test")
     parser.add_argument("--name", default="transformer")
@@ -31,8 +29,7 @@ if __name__ == "__main__":
     parser.add_argument("--constraint", default="MI250")
     parser.add_argument("--nodes", type=int, default=1)
     parser.add_argument("--exclusive", action="store_true", default=True)
-    parser.add_argument("--timeout-min", type=int, default=60,
-                        help="time in minutes, e.g. 60 for 1:00:00")
+    parser.add_argument("--timeout-min", type=int, default=60, help="time in minutes, e.g. 60 for 1:00:00")
     parser.add_argument("--ntasks-per-node", type=int, default=8)
     parser.add_argument("--cpus-per-task", type=int, default=8)
     parser.add_argument("--gpus-per-task", type=int, default=1)
@@ -49,12 +46,12 @@ if __name__ == "__main__":
     run_dir = log_root / f"{stamp}-{git_hash[:8]}"
     snapshot = run_dir / "code"
     snapshot.mkdir(parents=True, exist_ok=True)
-    files = subprocess.check_output(
-        ["git", "ls-files", "src", "pyproject.toml"], text=True, cwd=project_root
-    )
+    files = subprocess.check_output(["git", "ls-files", "src", "pyproject.toml"], text=True, cwd=project_root)
     subprocess.run(
         ["rsync", "-a", "--files-from=-", str(project_root) + "/", str(snapshot) + "/"],
-        input=files, text=True, check=True,
+        input=files,
+        text=True,
+        check=True,
     )
 
     executor = submitit.AutoExecutor(folder=str(run_dir / "logs" / "%j"))
