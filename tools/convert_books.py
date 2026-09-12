@@ -10,12 +10,13 @@ import multiprocessing as mp
 import os
 import re
 import subprocess
-import sys
 from collections import Counter
 from pathlib import Path
 
-import numpy as np
 import fasttext
+import numpy as np
+
+
 # numpy>=2 + fasttext-wheel: predict() calls np.array(..., copy=False) which is
 # now disallowed. Replace with np.asarray.
 def _predict_patched(self, text, k=1, threshold=0.0, on_unicode_error='strict'):
