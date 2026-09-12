@@ -1,8 +1,13 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Project root: go up from utils/ -> src/ -> ROOT
 ROOT = Path(__file__).resolve().parents[2]
+
+# load machine-specific environment variables (e.g. wandb key, data/experiment dir)
+load_dotenv(ROOT / ".env", override=False)
 
 # env-var overrides so the same code works on a cluster
 # where data / experiments live on a scratch filesystem.
