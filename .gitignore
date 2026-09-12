@@ -64,3 +64,4 @@ Thumbs.db
 .idea/
 mutagen.yml.lock
 mutagen.yml
+slurm/rsync_data.sh

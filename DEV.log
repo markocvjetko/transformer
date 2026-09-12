@@ -113,11 +113,6 @@ Check claude comments on what is the relationship between these datasets.
     - https://www.youtube.com/watch?v=QZLxis-p8yE
 
 
-25.05.2026.
-- data deduplicaiton presentation, references methods i can use:
-    - https://www.youtube.com/watch?v=QZLxis-p8yE
-
-
 30.05.2026.
 - Figuring out the submit script
 
@@ -195,3 +190,56 @@ https://arxiv.org/abs/2506.19468
 
 18.06.2026.
 gpt2 basic train loop seems to work, needs more testing
+
+
+30.08.2026.
+
+Created a WikipediaHR dataset. Concatenates the whole wiki corpus into a single string and tokenizes it.
+Places EOS token inbetween each document (like in GPT2).
+
+To be committed and I need to clear up how to organize all the datasets and different types of dataloaders. 
+Right now it is quite unclean.
+
+
+---
+
+I discussed with Claude and it showed some convincing evidence on what datasets I should pursue for Croatian,
+namely Classla v2.0, which is a very recent corpus of south slavic languages. around 3B words for Croatian.
+
+This should be used as the croatian base.
+
+The english base is fineweb-edu.
+
+I will start the first few small training runs with these datasets 50/50 split. I.e. full classla and a subset of fineweb, since
+classla is much smaller
+
+https://claude.ai/share/c8a5730a-6dca-42cc-ab1d-382cee9a4520
+
+both classla datasets are downloaded, to be processed.
+
+Use fine-edu and classla to train a tokenizer.
+
+
+31.08.2026.
+
+Classlav2 has a list of duplicates from classlav1
+https://github.com/login?return_to=%2Fclarinsi%2Fclassla-web
+
+Created a notebook for prototyping creating a tokenizer.
+classla_v2.ipynb
+
+
+05.09.2026.
+
+Created v2 of the BPE, src/tokenizers/BPE_v2.py. Works on UTF-8 bytes.
+
+Plan for today. Create a function that takes a dataset (iterable that outputs text), 
+and creates a npz datafile and idx file that says where each sample ends.
+
+Question: should it be multi-process? Let's first try with a single thread that creates one large npz file.
+
+
+11.09.2026.
+
+Created measures for perplexity and Bits-per-Byte, its not so well structured though.
+
