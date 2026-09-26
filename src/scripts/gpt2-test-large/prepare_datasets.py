@@ -7,7 +7,7 @@ from omegaconf import OmegaConf
 from datasets import load_dataset
 from src.datasets.preprocess.sources import HFSource, JsonlSource
 from src.datasets.preprocess.tokenize_corpus import create_npy_dataset
-from src.tokenizers.BPE_v2 import BytePairEncoding
+from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
 
@@ -58,10 +58,15 @@ def main(config_path: str | None = None, overrides: list[str] | None = None):
     yaml_path = args[0] if args and "=" not in args[0] else None
     cli_overrides = args[1:] if yaml_path else args
     config = load_config(yaml_path, cli_overrides)
-    print(OmegaConf.to_yaml(config)) #log umjesto printa Logging python modul
+    print("\n[INFO] Loaded configuration:")
+    print(OmegaConf.to_yaml(config))  # log umjesto printa Logging python modul
 
+    print("\n[INFO] Initializing Classla v2 JSONL corpus...")
     classla_v2 = JsonlSource(**config.classla_v2)
-    
+    print("[INFO] Classla v2 corpus loaded from:", config.classla_v2.path)
+
+    print("\n[INFO] Initializing Fineweb (HuggingFace) dataset...")
+    print(f"[INFO] Loading HF dataset: {config.fineweb_edu.repo}, name: {config.fineweb_edu.name}, split: {config.fineweb_edu.split}")
     fineweb_edu = HFSource(
         load_dataset(
             path=config.fineweb_edu.repo,
@@ -71,11 +76,19 @@ def main(config_path: str | None = None, overrides: list[str] | None = None):
         ),
         field=config.fineweb_edu.field
     )
+    print("[INFO] Fineweb HF dataset loaded (field:", config.fineweb_edu.field, ")")
 
+    print("\n[INFO] Loading tokenizer from:", config.tokenizer.path)
     tokenizer = BytePairEncoding.from_file(config.tokenizer.path)
+    print("[INFO] Tokenizer loaded.")
 
+    print("\n[INFO] Creating npy dataset for Classla v2...")
     create_npy_dataset(classla_v2, tokenizer, config.save_dir / "classla_v2")
+    print("[INFO] Classla v2 dataset created at", config.save_dir / "classla_v2")
+
+    print("\n[INFO] Creating npy dataset for Fineweb-edu...")
     create_npy_dataset(fineweb_edu, tokenizer, config.save_dir / "fineweb-edu")
+    print("[INFO] Fineweb-edu dataset created at", config.save_dir / "fineweb-edu")
 
 if __name__ == "__main__":
     
