@@ -2,30 +2,34 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Literal
 
-import lightning as L
 import numpy as np
 import torch
 import wandb
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
+from lightning.pytorch.profilers import PyTorchProfiler
 from omegaconf import II, OmegaConf
-from src.tokenizers.BPE_v2 import BytePairEncoding
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.optim import lr_scheduler
+from torch.profiler import ProfilerActivity, schedule
+from torch.utils.data import DataLoader
 
-from src.datasets.next_token import NextTokenPredictionDataset
+import lightning as L
+from src.datasets.token_mixture import TokenMixtureDataset
+from src.lightning.lit_gpt import LitGPT
 from src.metrics.metrics import BitsPerByte
 from src.models.gpt2 import GPT2
-from src.train.lit_gpt import LitGPT
+from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
 print("lightning version:", L.__version__)
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision("medium")
 
 
 @dataclass
 class TokenizerConfig:
-    path: Path = paths.EXPERIMENTS_DIR / "gpt2-test-large/BPE_vocab_48k"
+    path: Path = paths.EXPERIMENTS_DIR / "gpt2-test-large/BPE_vocab_48k_hr_en"
 
 
 @dataclass
@@ -35,15 +39,32 @@ class ModelConfig:
     d_ff: int = 512
     n_heads: int = 8
     N: int = 12
-    max_len: int = II("..seq_len")
+    seq_len: int = II("..seq_len")
     compile_model: bool = False
 
 
 @dataclass
 class OptimizerConfig:
-    name: str = "adamw" # only adamw supported atm
-    lr: float = 1e-4
-    weight_decay: float = 0.01
+    name: Literal["adamw"] = "adamw"
+    kwargs: dict[str, Any] = field(
+        default_factory=lambda: {
+            "lr": 1e-4,
+            "weight_decay": 0.01,
+        }
+    )
+
+
+@dataclass
+class LRSchedulerConfig:
+    name: Literal["wsd", "constant"] = "wsd"
+    kwargs: dict[str, Any] = field(
+        default_factory=lambda: {
+            "max_steps": -1,  ### THIS IS COMPUTED ONCE THE EFFECTIVE BATCH SIZE IS KNOWN
+            "warmup_ratio": 0.15,
+            "decay_ratio": 0.15,
+            "min_lr_ratio": 0.1,
+        }
+    )
 
 
 ### TRAINER CALLBACKS
@@ -53,7 +74,7 @@ class CheckpointConfig:
     save_dir: str = II("..save_dir")
     save_top_k: int = 3
     save_last: bool = True
-    every_n_epochs: int = 1
+    every_n_train_steps: int = 1
     monitor: str = "val_loss"
     mode: str = "min"
 
@@ -68,30 +89,47 @@ class EarlyStoppingConfig:
 
 @dataclass
 class WandbConfig:
-    enabled: bool = True
-    project: str = "gpt-test-large"
+    enabled: bool = False
+    project: str = "gpt2-test-large"
     name: str = "default"
+    log_freq: int = -1
 
 
 ### TRAINER
 @dataclass
 class TrainerConfig:
-    max_epochs: int = 1000
+    max_steps: int = 1_000_000_000
     accelerator: str = "gpu"
-    precision: str = "bf16-mixed"
+    precision: str = "16-mixed"
     devices: int = -1  # -1 uses all available
     num_nodes: int = 1
-    strategy: str = "auto" # auto, ddp
+    accumulate_grad_batches: int | None = None
+    gradient_clip_val: float | None = 0.5
+    strategy: str = "auto"  # auto, ddp
     log_every_n_steps: int = 100
-    check_val_every_n_epoch: int = 1
+    val_check_interval: int = 10_000_000  # II("..max_steps") // 10
+    limit_val_batches: int | None = None
     early_stopping_patience: int = 5
     resume_from: str | None = None  # None, path to .ckpt, or "last" to auto-pick
+    profiler: str | None = None
 
 
 @dataclass
 class DatasetConfig:
-    classla_v2_hr: Path = paths.DATA_DIR / "gpt2-test-large/classla_v2_data.npy"
-    fineweb_edu: Path = paths.DATA_DIR / "gpt2-test-large/fineweb-edu_data.npy"
+    paths: list[Path] = field(
+        default_factory=lambda: [
+            paths.DATA_DIR / "gpt2-test-large/classla_hr_v2/merged.npy",
+            paths.DATA_DIR / "gpt2-test-large/fineweb-edu_data.npy",
+            paths.DATA_DIR / "gpt2-test-large/macocu_hr_en_v2_data.npy",
+        ]
+    )
+    weights: list[float] = field(
+        default_factory=lambda: [
+            0.48,
+            0.48,
+            0.04,
+        ]
+    )
     seq_len: int = II("..seq_len")
 
     shuffle: bool = False
@@ -105,11 +143,12 @@ class Config:
     save_dir: Path = paths.EXPERIMENTS_DIR / "gpt2-test-large"
 
     seq_len: int = 256
-    vocab_size: int = 48004
+    vocab_size: int = 48006
 
     tokenizer: TokenizerConfig = field(default_factory=TokenizerConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+    lr_scheduler: LRSchedulerConfig = field(default_factory=LRSchedulerConfig)
     checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
     early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
@@ -130,7 +169,7 @@ def load_config(config_path: str | None, cli_overrides: list[str]) -> Config:
 
 
 def main():
-    
+
     # usage: python <script_name>.py experiment.yaml batch_size=128 optimizer.lr=1e-3
     args = sys.argv[1:]
     yaml_path = args[0] if args and "=" not in args[0] else None
@@ -138,23 +177,12 @@ def main():
     cfg = load_config(yaml_path, cli_overrides)
     print(OmegaConf.to_yaml(cfg))  # log umjesto printa Logging python modul
 
-    dataset_fineweb = NextTokenPredictionDataset(dataset_path=cfg.dataset.fineweb_edu, seq_len=cfg.dataset.seq_len)
+    dataset = TokenMixtureDataset(cfg.dataset.paths, cfg.dataset.weights, cfg.dataset.seq_len)
+    ds_train = dataset
+    ds_val = dataset
 
-    dataset_classla_v2_hr = NextTokenPredictionDataset(
-        dataset_path=cfg.dataset.classla_v2_hr, seq_len=cfg.dataset.seq_len
-    )
-
-    from torch.utils.data import Subset
-
-    ds_train_full = ConcatDataset([dataset_fineweb, dataset_classla_v2_hr])
-    # Use 100,000 tokens for train, next 100,000 for val
-    ds_train = Subset(ds_train_full, list(range(min(70000, len(ds_train_full)))))
-    ds_val = Subset(ds_train_full, list(range(70000, min(210_000, len(ds_train_full)))))
-    print(len(ds_train))
-    print(len(ds_val))
     def collate_fn(batch: np.array):
         return torch.tensor(np.stack(batch, axis=0), dtype=torch.long)
-   
 
     dataloader_train = DataLoader(
         ds_train,
@@ -165,8 +193,12 @@ def main():
         drop_last=True,
         pin_memory=True,
         prefetch_factor=4,
-        persistent_workers=True
+        persistent_workers=True,
     )
+
+    # Sample a single element from the DataLoader and print its shape
+    sample_batch = next(iter(dataloader_train))
+    print(f"Sample batch shape: {sample_batch.shape}")
 
     dataloader_val = DataLoader(
         ds_val,
@@ -177,46 +209,53 @@ def main():
         drop_last=True,
         pin_memory=True,
         prefetch_factor=4,
-        persistent_workers=True
+        persistent_workers=True,
     )
 
     model = GPT2(
         vocab_size=cfg.model.vocab_size,
-        seq_len=cfg.model.max_len,
+        seq_len=cfg.model.seq_len,
         d_model=cfg.model.d_model,
         d_ff=cfg.model.d_ff,
         n_heads=cfg.model.n_heads,
         N=cfg.model.N,
-        # pad_token_id=cfg.model.pad_token_id,
-        # eos_token_id=cfg.model.eos_token_id,
-        # p_dropout=cfg.model.dropout,
     )
 
     if cfg.model.compile_model:
         model = torch.compile(model)
 
     tokenizer = BytePairEncoding.from_file(cfg.tokenizer.path)
-    bits_per_byte = BitsPerByte(tokenizer.vocab)
+    bits_per_byte = BitsPerByte(tokenizer.vocab, tokenizer._special_vocab)
+
+    num_devices = cfg.trainer.devices if cfg.trainer.devices > 0 else torch.cuda.device_count()
+    eff_tok_per_batch = (
+        cfg.dataset.batch_size * cfg.dataset.seq_len * max(1, num_devices) * cfg.trainer.accumulate_grad_batches
+    )
+    max_steps = cfg.trainer.max_steps // eff_tok_per_batch
+
+    cfg.lr_scheduler.max_iters = max_steps
 
     lit_model = LitGPT(
         transformer=model,
         optim=cfg.optimizer.name,
-        lr=cfg.optimizer.lr,
-        bits_per_byte = bits_per_byte,
-        weight_decay=cfg.optimizer.weight_decay,
+        optim_kwargs=cfg.optimizer.kwargs,
+        lr_scheduler=cfg.lr_scheduler.name,
+        lr_scheduler_kwargs=cfg.lr_scheduler.kwargs,
+        bits_per_byte=bits_per_byte,
     )
     callbacks = []
+    callbacks.append(LearningRateMonitor(logging_interval="step"))
     if cfg.checkpoint.enabled:
         callbacks.append(
-        ModelCheckpoint(
-            dirpath=cfg.checkpoint.save_dir,
-            save_top_k=cfg.checkpoint.save_top_k,
-            save_last=cfg.checkpoint.save_last,
-            every_n_epochs=cfg.checkpoint.every_n_epochs,
-            monitor=cfg.checkpoint.monitor,
-            mode=cfg.checkpoint.mode,
+            ModelCheckpoint(
+                dirpath=cfg.checkpoint.save_dir,
+                save_top_k=cfg.checkpoint.save_top_k,
+                save_last=cfg.checkpoint.save_last,
+                every_n_train_steps=cfg.checkpoint.every_n_train_steps,
+                monitor=cfg.checkpoint.monitor,
+                mode=cfg.checkpoint.mode,
+            )
         )
-    )
     if cfg.early_stopping.enabled:
         callbacks.append(
             EarlyStopping(
@@ -231,27 +270,58 @@ def main():
         CSVLogger(save_dir=cfg.save_dir),
     )
     if cfg.wandb.enabled:
-        loggers.append(
-            WandbLogger(
-                name=cfg.project_name,
-                save_dir=cfg.save_dir,
-                project=cfg.project_name,
-                #offline=True,
-                offline=os.environ.get("WANDB_MODE", "online") == "offline",
-            )
+        wandb_logger = WandbLogger(
+            name=cfg.wandb.name,
+            save_dir=cfg.save_dir,
+            project=cfg.wandb.project,
+            offline=os.environ.get("WANDB_MODE", "online") == "offline",
         )
+        wandb_logger.watch(
+            lit_model.transformer,
+            log_freq=cfg.wandb.log_freq,
+            log="gradients",
+            log_graph=False,
+        )
+        wandb_logger.log_hyperparams(OmegaConf.to_container(cfg, resolve=True))
+        loggers.append(wandb_logger)
+
+    if cfg.trainer.profiler == "pytorch":
+        profiler = PyTorchProfiler(
+            dirpath=cfg.save_dir,
+            filename="perf",
+            export_to_chrome=True,
+            record_module_names=True,
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            schedule=schedule(wait=1, warmup=1, active=3, repeat=1),
+            record_shapes=True,
+            profile_memory=False,
+            with_stack=False,
+            with_flops=False,
+        )
+    else:
+        profiler = None
+
+    print(
+        f"training for {max_steps} batches across {num_devices} device(s)\n"
+        f"Effective token count per batch: {eff_tok_per_batch} (batch_size={cfg.dataset.batch_size} × seq_len={cfg.dataset.seq_len} × num_devices={num_devices} × grad_accum={grad_accum})"
+    )
 
     trainer = L.Trainer(
         accelerator=cfg.trainer.accelerator,
-        max_epochs=cfg.trainer.max_epochs,
+        max_steps=max_steps,
         devices=cfg.trainer.devices,
         num_nodes=cfg.trainer.num_nodes,
+        accumulate_grad_batches=cfg.trainer.accumulate_grad_batches,
+        gradient_clip_val=cfg.trainer.gradient_clip_val,
         strategy=cfg.trainer.strategy,
+        precision=cfg.trainer.precision,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
-        check_val_every_n_epoch=cfg.trainer.check_val_every_n_epoch,
+        val_check_interval=max_steps // 10,
+        limit_val_batches=cfg.trainer.limit_val_batches,
         enable_checkpointing=cfg.checkpoint.enabled,
         callbacks=callbacks,
         logger=loggers,
+        profiler=profiler,
     )
     try:
         # near the end of main(), replacing the trainer.fit line
