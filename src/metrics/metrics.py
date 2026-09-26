@@ -17,7 +17,7 @@ class Perplexity:
 
 class BitsPerByte:
 
-    def __init__(self, vocab: dict, device=None):
+    def __init__(self, vocab: dict, special_vocab: dict, device=None):
         """
         Vocabulary from which token byte lens are read
         """
@@ -26,13 +26,18 @@ class BitsPerByte:
    
 
         self.vocab = vocab
+        self.special_vocab = special_vocab
         self.token_lens = {
             idx: len(text.encode('utf-8')) for text, idx in vocab.items()
         }
-        ids = torch.tensor(list(vocab.values()), device=device)
-        lens = torch.tensor([len(token) for token in vocab], device=device)
-        self.id_to_len = torch.zeros(int(ids.max()) + 1, dtype=torch.long, device=device)
-        self.id_to_len[ids] = lens
+        for _, idx in special_vocab.items():
+            self.token_lens[idx] = 0
+   
+        max_id = max(self.token_lens.keys()) if self.token_lens else 0
+        self.id_to_len = torch.zeros(int(max_id) + 1, dtype=torch.long, device=device)
+   
+        for k, v in self.token_lens.items():
+            self.id_to_len[k] = v
 
     def compute(self, logits: torch.Tensor, targets: torch.Tensor):
         """
