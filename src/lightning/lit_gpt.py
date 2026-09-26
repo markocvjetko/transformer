@@ -84,20 +84,16 @@ class LitGPT(L.LightningModule):
         # Logging to TensorBoard (if installed) by defaultexperiment_name
 
         # if there is self.val_dataset_names print per dataset metrics, otherwise aggregated
-        if self.val_dataset_names:
-            self.log(
-                f"val_loss {self.val_dataset_names[dataloader_idx]}", loss, on_step=False, on_epoch=True, sync_dist=True
-            )
-            self.log(
-                f"val_bpb {self.val_dataset_names[dataloader_idx]}", bpb, on_step=False, on_epoch=True, sync_dist=True
-            )
+        if self.val_dataset_names is not None and dataloader_idx is not None:
+            self.log(f"val_loss {self.val_dataset_names[dataloader_idx]}", loss, on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
+            self.log(f"val_bpb {self.val_dataset_names[dataloader_idx]}", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
         else:
-            self.log("val_loss", loss.mean(), on_step=False, on_epoch=True, sync_dist=True)
-            self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True)
+            self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
+            self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
 
         return loss
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, batch_idx):  
         pass
 
     def on_load_checkpoint(self, checkpoint):
@@ -114,9 +110,9 @@ class LitGPT(L.LightningModule):
 
         if self.lr_scheduler_name is None:
             return [optimizer]
-        elif self.lr_schedler_name == "wsd":
+        elif self.lr_scheduler_name == "wsd":
             scheduler = warmup_stable_decay_scheduler(optimizer, **self.lr_scheduler_kwargs)
-            return [optimizer], [scheduler]
+            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
         else:
             raise ValueError(f"Unsupported scheduler: {self.scheduler_name}")
 
