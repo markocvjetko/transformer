@@ -1,5 +1,4 @@
 import numpy as np
-import torch
 from torch.utils.data import IterableDataset
 
 
@@ -26,7 +25,6 @@ class TokenMixtureDataset(IterableDataset):
             idx = rng.choice(len(self.ds), p=self.weights)
             start = rng.integers(0, len(self.ds[idx]) - self.seq_len)
             sample = self.ds[idx][start : start + self.seq_len + 1]
-            #sample = torch.from_numpy(sample)
             yield sample
 
 
