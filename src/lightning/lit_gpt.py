@@ -10,6 +10,7 @@ import lightning as L
 from datasets import load_dataset
 from src.datasets.next_token import NextTokenPredictionDataset
 from src.models.gpt2 import GPT2
+from src.optim.scheduler import warmup_stable_decay_scheduler
 from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
 
@@ -37,13 +38,21 @@ class Args:
 
 class LitGPT(L.LightningModule):
     def __init__(
-        self, transformer, optim="adamw", lr=3e-4, weight_decay=0.01, bits_per_byte=None, val_dataset_names=None
+        self,
+        transformer,
+        optim_name="adamw",
+        optim_kwargs=None,
+        lr_scheduler_name=None,
+        lr_scheduler_kwargs=None,
+        bits_per_byte=None,
+        val_dataset_names=None,
     ):
         super().__init__()
         self.transformer = transformer
-        self.optim = optim
-        self.lr = lr
-        self.weight_decay = 0.1
+        self.optim_name = optim_name
+        self.optim_kwargs = optim_kwargs
+        self.lr_scheduler_name = lr_scheduler_name
+        self.lr_scheduler_kwargs = lr_scheduler_kwargs
         self.save_hyperparameters(ignore=["transformer"])
         self.bits_per_byte = bits_per_byte
         self.val_dataset_names = val_dataset_names
@@ -91,15 +100,25 @@ class LitGPT(L.LightningModule):
     def test_step(self, batch, batch_idx):
         pass
 
-    def configure_optimizers(self):
-        if self.optim == "adamw":
-            optimizer = optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        elif self.optim == "muon":
-            raise NotImplementedError("Muon optimizer is not yet supported.")
+    def on_load_checkpoint(self, checkpoint):
+        checkpoint["state_dict"] = {
+            key.replace("transformer._orig_mod.", "transformer.", 1): value
+            for key, value in checkpoint["state_dict"].items()
+        }
 
+    def configure_optimizers(self):
+        if self.optim_name == "adamw":
+            optimizer = optim.AdamW(self.parameters(), **self.optim_kwargs)
         else:
-            raise ValueError(f"Unsupported optimizer: {self.optim}")
-        return optimizer
+            raise ValueError(f"Unsupported optimizer: {self.optim_name}")
+
+        if self.lr_scheduler_name is None:
+            return [optimizer]
+        elif self.lr_schedler_name == "wsd":
+            scheduler = warmup_stable_decay_scheduler(optimizer, **self.lr_scheduler_kwargs)
+            return [optimizer], [scheduler]
+        else:
+            raise ValueError(f"Unsupported scheduler: {self.scheduler_name}")
 
 
 if __name__ == "__main__":
