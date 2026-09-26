@@ -37,7 +37,7 @@ class MultiHeadAttention(nn.Module):
         attn_score /= math.sqrt(Q.shape[-1])
 
         # Apply causal mask (for decoder self-attention)
-        if not causal_mask:
+        if causal_mask is not None:
             attn_score = attn_score.masked_fill(
                 causal_mask[: attn_score.shape[-1], : attn_score.shape[-1]], float("-inf")
             )
@@ -196,24 +196,19 @@ class GPT2(nn.Module):
 
         return self.ff_output(self.ln_final(decoder_output))
 
-    def generate(self, x: torch.Tensor, temperature=1, seq_len=None, top_k=10, top_p=0.9):
-
+    def generate(self, x: torch.Tensor, temperature=1.0, seq_len=256, top_k=50, top_p=1.0):
+        # TODO: ADD top_p SUPPORT
         with torch.no_grad():
             while x.shape[-1] < seq_len:
                 logits = self(x)[:, -1, :]
-                logits *= temperature
+                logits /= temperature
                 probs = torch.softmax(logits, dim=-1)
-
-                # select top_k tokens per batch
                 top_k_vals, top_k_idx = torch.topk(probs, top_k, dim=-1)
                 cumsum = torch.cumsum(top_k_vals, dim=-1)
-                top_p_sums = cumsum <= top_p
+                cumsum_masked = top_k_vals
+                samples = torch.multinomial(cumsum_masked, num_samples=1)
 
-                cumsum = cumsum * top_p_sums
-                print(cumsum)
-                samples = torch.multinomial(cumsum, num_samples=1)
-
-                x = torch.cat((x, samples), dim=-1)
+                x = torch.cat((x, torch.gather(top_k_idx, dim=1, index=samples)), dim=-1)
         return x
 
 
