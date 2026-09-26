@@ -1,0 +1,92 @@
+project_name: gpt2-test-large
+save_dir: ${paths:EXPERIMENTS_DIR}/gpt2-test-large
+
+seq_len: 512
+vocab_size: 48006
+
+tokenizer:    # not used since the dataset is already pretokenized
+  path: ${paths:EXPERIMENTS_DIR}/gpt2-test-large/BPE_vocab_48k_hr_en
+
+model:
+  vocab_size: ${..vocab_size}
+  d_model: 768
+  d_ff: 3072
+  n_heads: 12
+  N: 12
+  seq_len: ${..seq_len}
+  compile_model: true
+
+optimizer:
+  name: adamw
+  kwargs: 
+    lr: 5.0e-4
+    betas: [0.9, 0.95]
+    eps: 1.0e-8
+    weight_decay: 0.01
+
+lr_scheduler:
+  name: wsd
+  kwargs:
+    max_iters: -1  # computed after optim step is known
+    warmup_ratio: 0.15
+    decay_ratio: 0.15
+    min_lr_ratio: 0.1
+
+checkpoint:
+  enabled: true
+  save_dir: ${..save_dir}
+  save_top_k: 5
+  save_last: true
+  monitor: "val_loss wikipedia_hr" 
+  mode: min
+
+early_stopping:
+  enabled: false ##########
+  monitor: "val_loss wikipedia_hr"  
+  mode: min
+  patience: 10
+
+wandb:
+  enabled: true
+  project: gpt2-test-large
+  name: jz-run
+  log_freq: 2000 # how often gradients and weight histograms are logged
+
+trainer:
+  max_tokens: 10_000_000_000 # how many tokens to train on
+  accelerator: gpu
+  precision: 16-mixed
+  devices: -1
+  num_nodes: 1
+  accumulate_grad_batches: 4
+  gradient_clip_val: 1.0
+  strategy: auto
+  log_every_n_steps: 100
+  val_check_interval: 0.05 # val every x / max_tokens
+  limit_val_batches: 10_000  # int | null
+  resume_from: null
+  profiler: null
+
+train_dataset:
+  paths:
+    - ${paths:DATA_DIR}/gpt2-test-large/classla_hr_v2/merged.npy
+    - ${paths:DATA_DIR}/gpt2-test-large/merged_fineweb_data.npy
+    - ${paths:DATA_DIR}/gpt2-test-large/macocu_hr_en_v2_data.npy
+  weights:
+    - 0.47
+    - 0.47
+    - 0.06
+  seq_len: ${..seq_len}
+  shuffle: false
+  num_workers: 10
+  batch_size: 32
+
+
+val_dataset:
+  paths:
+    - ${paths:DATA_DIR}/gpt2-test-large/wikipedia_hr/merged.npy
+    - ${paths:DATA_DIR}/gpt2-test-large/wikipedia_en/merged.npy
+  names:
+    - wikipedia_hr
+    - wikipedia_en
+  seq_len: ${..seq_len}

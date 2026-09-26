@@ -2,7 +2,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import torch
@@ -11,11 +11,11 @@ from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.profilers import PyTorchProfiler
 from omegaconf import II, OmegaConf
-from torch.optim import lr_scheduler
 from torch.profiler import ProfilerActivity, schedule
 from torch.utils.data import DataLoader
 
 import lightning as L
+from src.datasets.next_token import NextTokenPredictionDataset
 from src.datasets.token_mixture import TokenMixtureDataset
 from src.lightning.lit_gpt import LitGPT
 from src.metrics.metrics import BitsPerByte
@@ -35,17 +35,17 @@ class TokenizerConfig:
 @dataclass
 class ModelConfig:
     vocab_size: int = II("..vocab_size")
-    d_model: int = 256
-    d_ff: int = 512
+    d_model: int = 128
+    d_ff: int = 256
     n_heads: int = 8
-    N: int = 12
+    N: int = 6
     seq_len: int = II("..seq_len")
     compile_model: bool = False
 
 
 @dataclass
 class OptimizerConfig:
-    name: Literal["adamw"] = "adamw"
+    name: str = "adamw"  # adamw only
     kwargs: dict[str, Any] = field(
         default_factory=lambda: {
             "lr": 1e-4,
@@ -56,10 +56,10 @@ class OptimizerConfig:
 
 @dataclass
 class LRSchedulerConfig:
-    name: Literal["wsd", "constant"] = "wsd"
+    name: str = "wsd"  # wsd or constant
     kwargs: dict[str, Any] = field(
         default_factory=lambda: {
-            "max_steps": -1,  ### THIS IS COMPUTED ONCE THE EFFECTIVE BATCH SIZE IS KNOWN
+            "max_iters": -1,  ### THIS IS COMPUTED ONCE THE EFFECTIVE BATCH SIZE IS KNOWN
             "warmup_ratio": 0.15,
             "decay_ratio": 0.15,
             "min_lr_ratio": 0.1,
@@ -75,6 +75,7 @@ class CheckpointConfig:
     save_top_k: int = 3
     save_last: bool = True
     every_n_train_steps: int = 1
+    train_step_ratio: float = 0.25
     monitor: str = "val_loss"
     mode: str = "min"
 
@@ -89,33 +90,32 @@ class EarlyStoppingConfig:
 
 @dataclass
 class WandbConfig:
-    enabled: bool = False
+    enabled: bool = True  # Enable wandb for debug runs
     project: str = "gpt2-test-large"
-    name: str = "default"
-    log_freq: int = -1
+    name: str = "debug-run"
+    log_freq: int = 1  # Log every step for debugging
 
 
 ### TRAINER
 @dataclass
 class TrainerConfig:
-    max_steps: int = 1_000_000_000
+    max_tokens: int = 1_000_000
     accelerator: str = "gpu"
     precision: str = "16-mixed"
     devices: int = -1  # -1 uses all available
     num_nodes: int = 1
-    accumulate_grad_batches: int | None = None
+    accumulate_grad_batches: int = 1
     gradient_clip_val: float | None = 0.5
     strategy: str = "auto"  # auto, ddp
-    log_every_n_steps: int = 100
-    val_check_interval: int = 10_000_000  # II("..max_steps") // 10
-    limit_val_batches: int | None = None
-    early_stopping_patience: int = 5
+    log_every_n_steps: int = 1
+    val_check_interval: float = 0.25  # max_steps * val_check_interval
+    limit_val_batches: int | None = 100
     resume_from: str | None = None  # None, path to .ckpt, or "last" to auto-pick
     profiler: str | None = None
 
 
 @dataclass
-class DatasetConfig:
+class TrainDatasetConfig:
     paths: list[Path] = field(
         default_factory=lambda: [
             paths.DATA_DIR / "gpt2-test-large/classla_hr_v2/merged.npy",
@@ -138,6 +138,18 @@ class DatasetConfig:
 
 
 @dataclass
+class ValDatasetConfig:
+    paths: list[Path] = field(
+        default_factory=lambda: [
+            paths.DATA_DIR / "gpt2-test-large/wikipedia_hr/merged.npy",
+            paths.DATA_DIR / "gpt2-test-large/wikipedia_en/merged.npy",
+        ]
+    )
+    names: list[str] = field(default_factory=lambda: ["wikipedia_hr", "wikipedia_en"])
+    seq_len: int = II("..seq_len")
+
+
+@dataclass
 class Config:
     project_name: str = "gpt2-test-large"
     save_dir: Path = paths.EXPERIMENTS_DIR / "gpt2-test-large"
@@ -153,7 +165,8 @@ class Config:
     early_stopping: EarlyStoppingConfig = field(default_factory=EarlyStoppingConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
-    dataset: DatasetConfig = field(default_factory=DatasetConfig)
+    train_dataset: TrainDatasetConfig = field(default_factory=TrainDatasetConfig)
+    val_dataset: ValDatasetConfig = field(default_factory=ValDatasetConfig)
 
 
 # resolves ${paths:DATA_DIR} / ${paths:EXPERIMENTS_DIR} in yaml configs
@@ -177,20 +190,19 @@ def main():
     cfg = load_config(yaml_path, cli_overrides)
     print(OmegaConf.to_yaml(cfg))  # log umjesto printa Logging python modul
 
-    dataset = TokenMixtureDataset(cfg.dataset.paths, cfg.dataset.weights, cfg.dataset.seq_len)
-    ds_train = dataset
-    ds_val = dataset
+    ds_train = TokenMixtureDataset(cfg.train_dataset.paths, cfg.train_dataset.weights, cfg.train_dataset.seq_len)
+    ds_val = [NextTokenPredictionDataset(path, cfg.val_dataset.seq_len) for path in cfg.val_dataset.paths]
 
     def collate_fn(batch: np.array):
         return torch.tensor(np.stack(batch, axis=0), dtype=torch.long)
 
     dataloader_train = DataLoader(
         ds_train,
-        batch_size=cfg.dataset.batch_size,
-        num_workers=cfg.dataset.num_workers,
-        shuffle=cfg.dataset.shuffle,
+        batch_size=cfg.train_dataset.batch_size,
+        num_workers=cfg.train_dataset.num_workers,
+        shuffle=cfg.train_dataset.shuffle,
         collate_fn=collate_fn,
-        drop_last=True,
+        drop_last=False,
         pin_memory=True,
         prefetch_factor=4,
         persistent_workers=True,
@@ -200,17 +212,20 @@ def main():
     sample_batch = next(iter(dataloader_train))
     print(f"Sample batch shape: {sample_batch.shape}")
 
-    dataloader_val = DataLoader(
-        ds_val,
-        batch_size=cfg.dataset.batch_size,
-        num_workers=cfg.dataset.num_workers,
-        shuffle=False,
-        collate_fn=collate_fn,
-        drop_last=True,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True,
-    )
+    dataloader_val = [
+        DataLoader(
+            ds,
+            batch_size=cfg.train_dataset.batch_size,
+            num_workers=cfg.train_dataset.num_workers,
+            shuffle=False,
+            collate_fn=collate_fn,
+            drop_last=True,
+            pin_memory=True,
+            prefetch_factor=4,
+            persistent_workers=False,
+        )
+        for ds in ds_val
+    ]
 
     model = GPT2(
         vocab_size=cfg.model.vocab_size,
@@ -228,20 +243,25 @@ def main():
     bits_per_byte = BitsPerByte(tokenizer.vocab, tokenizer._special_vocab)
 
     num_devices = cfg.trainer.devices if cfg.trainer.devices > 0 else torch.cuda.device_count()
-    eff_tok_per_batch = (
-        cfg.dataset.batch_size * cfg.dataset.seq_len * max(1, num_devices) * cfg.trainer.accumulate_grad_batches
-    )
-    max_steps = cfg.trainer.max_steps // eff_tok_per_batch
+    print(f"[DEBUG] batch_size: {cfg.train_dataset.batch_size}")
+    print(f"[DEBUG] seq_len: {cfg.train_dataset.seq_len}")
+    print(f"[DEBUG] num_devices: {num_devices} (max(1, num_devices) = {max(1, num_devices)})")
+    print(f"[DEBUG] accumulate_grad_batches: {cfg.trainer.accumulate_grad_batches}")
 
-    cfg.lr_scheduler.max_iters = max_steps
+    tokens_per_batch = cfg.train_dataset.batch_size * cfg.train_dataset.seq_len * max(1, num_devices)
+    tokens_per_optim_step = tokens_per_batch * cfg.trainer.accumulate_grad_batches
+    print(f"[DEBUG] eff_tok_per_batch: {tokens_per_optim_step}")
+    max_steps = cfg.trainer.max_tokens // tokens_per_optim_step
+    cfg.lr_scheduler.kwargs["max_iters"] = max_steps
 
     lit_model = LitGPT(
         transformer=model,
-        optim=cfg.optimizer.name,
+        optim_name=cfg.optimizer.name,
         optim_kwargs=cfg.optimizer.kwargs,
-        lr_scheduler=cfg.lr_scheduler.name,
+        lr_scheduler_name=cfg.lr_scheduler.name,
         lr_scheduler_kwargs=cfg.lr_scheduler.kwargs,
         bits_per_byte=bits_per_byte,
+        val_dataset_names=cfg.val_dataset.names,
     )
     callbacks = []
     callbacks.append(LearningRateMonitor(logging_interval="step"))
@@ -251,7 +271,8 @@ def main():
                 dirpath=cfg.checkpoint.save_dir,
                 save_top_k=cfg.checkpoint.save_top_k,
                 save_last=cfg.checkpoint.save_last,
-                every_n_train_steps=cfg.checkpoint.every_n_train_steps,
+                save_on_train_epoch_end=False,
+                every_n_epochs=1,
                 monitor=cfg.checkpoint.monitor,
                 mode=cfg.checkpoint.mode,
             )
@@ -278,7 +299,7 @@ def main():
         )
         wandb_logger.watch(
             lit_model.transformer,
-            log_freq=cfg.wandb.log_freq,
+            log_freq=cfg.wandb.log_freq * cfg.trainer.accumulate_grad_batches,
             log="gradients",
             log_graph=False,
         )
@@ -301,9 +322,13 @@ def main():
     else:
         profiler = None
 
+    print(f"training for {max_steps} batches across {num_devices} device(s)")
     print(
-        f"training for {max_steps} batches across {num_devices} device(s)\n"
-        f"Effective token count per batch: {eff_tok_per_batch} (batch_size={cfg.dataset.batch_size} × seq_len={cfg.dataset.seq_len} × num_devices={num_devices} × grad_accum={grad_accum})"
+        f"Effective token count per batch: {tokens_per_optim_step} "
+        f"(batch_size={cfg.train_dataset.batch_size} × "
+        f"seq_len={cfg.train_dataset.seq_len} × "
+        f"num_devices={num_devices} × "
+        f"grad_accum={cfg.trainer.accumulate_grad_batches})"
     )
 
     trainer = L.Trainer(
@@ -316,7 +341,8 @@ def main():
         strategy=cfg.trainer.strategy,
         precision=cfg.trainer.precision,
         log_every_n_steps=cfg.trainer.log_every_n_steps,
-        val_check_interval=max_steps // 10,
+        val_check_interval=int(max_steps * cfg.trainer.val_check_interval) * cfg.trainer.accumulate_grad_batches,
+        check_val_every_n_epoch=None,
         limit_val_batches=cfg.trainer.limit_val_batches,
         enable_checkpointing=cfg.checkpoint.enabled,
         callbacks=callbacks,
