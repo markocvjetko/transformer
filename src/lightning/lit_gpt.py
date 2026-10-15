@@ -97,14 +97,20 @@ class LitGPT(L.LightningModule):
         pass
 
     def on_load_checkpoint(self, checkpoint):
+        prefix = "transformer._orig_mod." if hasattr(self.transformer, "_orig_mod") else "transformer."
         checkpoint["state_dict"] = {
-            key.replace("transformer._orig_mod.", "transformer.", 1): value
+            (prefix + key.removeprefix("transformer.").removeprefix("_orig_mod.")
+             if key.startswith("transformer.") else key): value
             for key, value in checkpoint["state_dict"].items()
         }
 
     def configure_optimizers(self):
         if self.optim_name == "adamw":
-            optimizer = optim.AdamW(self.parameters(), **self.optim_kwargs)
+            params = [p for p in self.parameters() if p.requires_grad]
+            optimizer = optim.AdamW([
+                {"params": [p for p in params if p.ndim >= 2]},
+                {"params": [p for p in params if p.ndim < 2], "weight_decay": 0.0},
+            ], **self.optim_kwargs)
         else:
             raise ValueError(f"Unsupported optimizer: {self.optim_name}")
 
