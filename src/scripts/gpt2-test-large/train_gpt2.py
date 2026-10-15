@@ -104,9 +104,9 @@ class TrainerConfig:
     precision: str = "16-mixed"
     devices: int = -1  # -1 uses all available
     num_nodes: int = 1
+    strategy: str = "ddp"  # auto, ddp
     accumulate_grad_batches: int = 1
     gradient_clip_val: float | None = 0.5
-    strategy: str = "auto"  # auto, ddp
     log_every_n_steps: int = 1
     val_check_interval: float = 0.25  # max_steps * val_check_interval
     limit_val_batches: int | None = 100
