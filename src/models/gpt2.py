@@ -105,8 +105,6 @@ class GPT2(nn.Module):
         pad_token_id=0,
         eos_token_id=2,
         p_dropout=0.1,
-        n_beams=4,
-        alpha=0.6,
     ):
         super().__init__()
 
@@ -123,11 +121,8 @@ class GPT2(nn.Module):
         self.eos_token_id = eos_token_id
         self.p_dropout = p_dropout
 
-        self.n_beams = n_beams
-        self.alpha = alpha
-
         self.embedding_layer = nn.Embedding(vocab_size, d_model)
-        self.embedding_pos = nn.Embedding(seq_len, d_model)  # buffer auto-moves with .to(device)
+        self.embedding_pos = nn.Embedding(seq_len, d_model)
         self.dropout = nn.Dropout(p_dropout)
         self.register_buffer(
             "causal_mask",
@@ -150,9 +145,6 @@ class GPT2(nn.Module):
         self.apply(self._init_weights)
 
         for name, params in self.named_parameters():
-            if "ff.0.weight" in name:
-                # print(name)
-                nn.init.normal_(params, mean=0.0, std=0.02 / math.sqrt(2 * N))
             if "ff.2.weight" in name:
                 # print(name)
                 nn.init.normal_(params, mean=0.0, std=0.02 / math.sqrt(2 * N))
@@ -216,10 +208,18 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     transformer = GPT2(
-        vocab_size=16,
-        N=12,
-        d_model=768,
-        d_ff=768 * 4,
+        # vocab_size=48006,
+        # d_model=768,
+        # d_ff=3072,
+        # n_heads=12,
+        # N=12,
+        # seq_len=512,
+        vocab_size=48006,
+        d_model=512,
+        d_ff=2112,
+        n_heads=8,
+        N=30,
+        seq_len=512,
     ).to(device)
     num_params = sum(p.numel() for p in transformer.parameters())
     print(f"Number of parameters: {num_params}")
