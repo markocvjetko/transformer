@@ -9,7 +9,7 @@ authors = [
 ]
 dependencies = [
     "torch==2.8.0",
-    "datasets",
+    "datasets>=3.6.0",
     "tqdm",
     "sacrebleu",
     "matplotlib",
@@ -24,13 +24,22 @@ dependencies = [
     "lxml",
     "langid",
     "python-dotenv",
-    "omegaconf"
+    "omegaconf",
+    "randomname",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff",
     "docling"]
+
+flash = [
+    "flash-attn"
+]
+
+
+[tool.uv]
+no-build-isolation-package = ["flash-attn"]
 
 [build-system]
 requires = ["hatchling>=1.26"]
