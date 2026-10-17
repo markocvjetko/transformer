@@ -193,6 +193,7 @@ class DecoderLM(nn.Module):
         norm_type="rms",  # layer or rms
         ff_type="swiglu",  # gelu or swiglu
         use_bias=False,
+        **kwargs,
     ):
         super().__init__()
 
