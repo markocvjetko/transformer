@@ -62,11 +62,7 @@ class MultiHeadAttention(nn.Module):
         self.do = do
         self.causal_mask = causal_mask
         if causal_mask:
-            self.triu = torch.triu(
-                torch.ones(
-
-                )
-            )
+            self.triu = torch.triu(torch.ones())
         self.W_Q = nn.Linear(d_input, dq)
         self.W_K = nn.Linear(d_input, dk)
         self.W_V = nn.Linear(d_input, dv)
@@ -226,7 +222,7 @@ class Transformer(nn.Module):
         # embedding layer(token_id) -> weights
         # output layer(weights) -> token
         self.ff_output.weight = self.embedding_layer_decoder.embeddings.weight
-        
+
     def forward(self, x, y):
         """
         Args:
@@ -236,7 +232,7 @@ class Transformer(nn.Module):
         Return:
             Tensor of shape (B, M, vocab_size)
         #"""
-        
+
         src_padding_mask = x == self.pad_token_id
         tgt_padding_mask = y == self.pad_token_id
 
@@ -254,7 +250,7 @@ class Transformer(nn.Module):
         decoder_output = self.dropout(decoder_output)
         for decoder in self.decoders:
             decoder_output = decoder(decoder_output, x, tgt_padding_mask, src_padding_mask)
-        
+
         return self.ff_output(decoder_output)
 
     def translate_beam_search(self, x: torch.Tensor, y: torch.Tensor):
@@ -281,10 +277,10 @@ class Transformer(nn.Module):
             first_log_probs = F.log_softmax(self.forward(x, y), dim=-1)  # (B, N, vocab_size)
 
             topk_vals, topk_indices = torch.topk(first_log_probs, k=self.n_beams, dim=-1)
-            
+
             y = y.unsqueeze(1).repeat(1, self.n_beams, 1)
             y = torch.cat((y, topk_indices.transpose(1, 2)), dim=-1)
-            
+
             log_probs = torch.zeros((batch_size, self.n_beams))  # B, n_beams
             log_probs = log_probs.to(next(self.parameters()).device)
             active_beams = torch.ones((batch_size, self.n_beams), dtype=torch.bool)
@@ -306,7 +302,7 @@ class Transformer(nn.Module):
                 i = 0
                 for decoder in self.decoders:
                     i += 1
-                    
+
                     decoder_output = decoder(
                         decoder_output,
                         x_remaining,
@@ -316,7 +312,7 @@ class Transformer(nn.Module):
                 next_token = self.ff_output(decoder_output[:, -1])
                 token_logprobs = F.log_softmax(next_token)
                 token_logprobs = token_logprobs.reshape(x_enc.shape[0], self.n_beams, -1)
-                
+
                 # always select a finished beam
                 token_logprobs[not active_beams[remaining_batches]] = float("-inf")
                 token_logprobs[not active_beams[remaining_batches], self.pad_token_id] = 0.0
@@ -336,9 +332,8 @@ class Transformer(nn.Module):
                 batch_idx = torch.arange(y_remaining.shape[0]).unsqueeze(1)
 
                 y_remaining = y_remaining[batch_idx, beam_indices, :]
-                
-                y_remaining = torch.cat((y_remaining, token_indices.unsqueeze(-1)), dim=-1)
 
+                y_remaining = torch.cat((y_remaining, token_indices.unsqueeze(-1)), dim=-1)
 
                 y = torch.cat(
                     (
@@ -360,7 +355,6 @@ class Transformer(nn.Module):
             num_pad = (y == self.pad_token_id).sum(dim=-1)
             normalized_lengths = (lengths - num_pad).clamp(min=1)
             log_probs = log_probs / (normalized_lengths.float() ** self.alpha)
-
 
             return y
 
@@ -413,7 +407,7 @@ class Transformer(nn.Module):
 
             # update incomplete sequence tracker
             eos_mask = next_token.squeeze(-1) == self.eos_token_id
-            remaining = [idx for idx, is_eos in zip(remaining, eos_mask) if not is_eos]
+            remaining = [idx for idx, is_eos in zip(remaining, eos_mask, strict=True) if not is_eos]
 
         return y
 
@@ -444,14 +438,15 @@ class Transformer(nn.Module):
 if __name__ == "__main__":
     import torch
 
+    from src.lightning.lit_transformer import LitTransformer
     from src.tokenizers.BPE import BytePairEncoding
-    from src.train.lit_transformer import LitTransformer
-    vocab_size = 37000  
-    d_model = 256  
-    d_ff = 512  
-    n_heads = 8 
-    N = 6  
-    seq_len = 256  
+
+    vocab_size = 37000
+    d_model = 256
+    d_ff = 512
+    n_heads = 8
+    N = 6
+    seq_len = 256
 
     transformer = Transformer(
         vocab_size=vocab_size,

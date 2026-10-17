@@ -1,7 +1,3 @@
-"""
-Preprocessing for parallel corpus Macocu-hr-en-v2 dataset.
-"""
-
 import concurrent
 import concurrent.futures
 import json
