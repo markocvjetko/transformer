@@ -1,0 +1,137 @@
+project_name: gpt2-test-large
+save_dir: null
+seq_len: 512
+vocab_size: 48006
+tokenizer:
+  path: !!python/object/apply:pathlib.PosixPath
+  - /
+  - lustre
+  - fsn1
+  - projects
+  - rech
+  - imi
+  - uix29qp
+  - proj
+  - transformer
+  - experiments
+  - gpt2-test-large
+  - BPE_vocab_48k_hr_en
+model:
+  vocab_size: 48006
+  seq_len: 512
+  d_model: 512
+  d_ff: 1408
+  n_heads: 8
+  'N': 30
+  p_dropout: 0.1
+  pos_emb_type: rope
+  rope_base: 10000
+  norm_type: rms
+  ff_type: swiglu
+  use_bias: false
+  compile_model: true
+optimizer:
+  name: adamw
+  kwargs:
+    lr: 0.0005
+    weight_decay: 0.01
+    betas:
+    - 0.9
+    - 0.95
+    eps: 1.0e-08
+lr_scheduler:
+  name: wsd
+  kwargs:
+    max_iters: 40690
+    warmup_ratio: 0.1
+    decay_ratio: 0.15
+    min_lr_ratio: 0.1
+checkpoint:
+  enabled: true
+  save_dir: null
+  save_top_k: 5
+  save_last: true
+  every_n_train_steps: 1
+  train_step_ratio: 0.25
+  monitor: val_loss wikipedia_hr
+  mode: min
+early_stopping:
+  enabled: false
+  monitor: val_loss wikipedia_hr
+  mode: min
+  patience: 10
+wandb:
+  enabled: true
+  project: gpt2-test-large
+  group: null
+  name: null
+  log_freq: 2000
+trainer:
+  max_tokens: 10000000000
+  accelerator: gpu
+  precision: 16-mixed
+  devices: 4
+  num_nodes: 1
+  strategy: auto
+  accumulate_grad_batches: 5
+  gradient_clip_val: 1.0
+  log_every_n_steps: 100
+  val_check_interval: 0.05
+  limit_val_batches: 1000
+  resume_from: null
+  profiler: null
+train_dataset:
+  paths:
+  - !!python/object/apply:pathlib.PosixPath
+    - /
+    - lustre
+    - fsn1
+    - projects
+    - rech
+    - imi
+    - uix29qp
+    - proj
+    - transformer
+    - data
+    - gpt2-test-large
+    - merged_fineweb_data.npy
+  weights:
+  - 1.0
+  seq_len: 512
+  shuffle: false
+  num_workers: 10
+  batch_size: 24
+val_dataset:
+  paths:
+  - !!python/object/apply:pathlib.PosixPath
+    - /
+    - lustre
+    - fsn1
+    - projects
+    - rech
+    - imi
+    - uix29qp
+    - proj
+    - transformer
+    - data
+    - gpt2-test-large
+    - wikipedia_hr
+    - merged.npy
+  - !!python/object/apply:pathlib.PosixPath
+    - /
+    - lustre
+    - fsn1
+    - projects
+    - rech
+    - imi
+    - uix29qp
+    - proj
+    - transformer
+    - data
+    - gpt2-test-large
+    - wikipedia_en
+    - merged.npy
+  names:
+  - wikipedia_hr
+  - wikipedia_en
+  seq_len: 512

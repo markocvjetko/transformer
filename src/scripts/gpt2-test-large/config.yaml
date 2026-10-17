@@ -1,60 +1,84 @@
 project_name: gpt2-test-large
 save_dir: ${paths:EXPERIMENTS_DIR}/gpt2-test-large
 
-seq_len: 256
-vocab_size: 48004
+seq_len: 512
+vocab_size: 48006
 
 tokenizer:
-  path: ${paths:EXPERIMENTS_DIR}/gpt2-test-large/BPE_vocab_48k
+  path: ${paths:EXPERIMENTS_DIR}/gpt2-test-large/BPE_vocab_48k_hr_en
 
 model:
   vocab_size: ${..vocab_size}
-  d_model: 256
-  d_ff: 512
+  d_model: 512
+  d_ff: 2048
   n_heads: 8
   N: 12
-  max_len: ${..seq_len}
-  compile_model: True
+  seq_len: ${..seq_len}
+  compile_model: true ######## true
 
 optimizer:
   name: adamw
-  lr: 1.0e-4
-  weight_decay: 0.01
+  kwargs: 
+    lr: 1.0e-4
+    weight_decay: 0.01
+
+lr_scheduler:
+  name: wsd
+  kwargs:
+    max_steps: -1  # COMPUTED ONCE THE EFFECTIVE BATCH SIZE IS KNOWN
+    warmup_ratio: 0.15
+    decay_ratio: 0.15
+    min_lr_ratio: 0.1
+
 
 checkpoint:
-  enabled: false
+  enabled: true
   save_dir: ${..save_dir}
   save_top_k: 3
   save_last: true
-  every_n_epochs: 1
+  every_n_train_steps: 1000
   monitor: val_loss
   mode: min
 
 early_stopping:
-  enabled: false
+  enabled: false ##########
   monitor: val_loss
   mode: min
   patience: 10
 
 wandb:
   enabled: true
-  project: gpt-test-large
+  project: gpt2-test-large
   name: default
+  log_freq: 2000 # how often gradients and weight histograms are logged
 
 trainer:
-  max_epochs: 1000
+  max_steps: 10_000_000_000
   accelerator: gpu
-  devices: -1
+  precision: 16-mixed
+  devices: 1
   num_nodes: 1
+  accumulate_grad_batches: 4
+  gradient_clip_val: 0.5
   strategy: auto
-  log_every_n_steps: 100
-  check_val_every_n_epoch: 1
+  log_every_n_steps: 10
+
+ #val_check_interval: 
+  limit_val_batches: 10
   early_stopping_patience: 5
-  resume_from:
+  resume_from: null
+  profiler: pytorch
 
 dataset:
-  classla_v2_hr: ${paths:DATA_DIR}/gpt2-test-large/classla_v2_data.npy
-  fineweb_edu: ${paths:DATA_DIR}/gpt2-test-large/fineweb-edu_data.npy
+  paths:
+    - ${paths:DATA_DIR}/gpt2-test-large/classla_hr_v2/merged.npy
+    - ${paths:DATA_DIR}/gpt2-test-large/merged_fineweb_data.npy
+    - ${paths:DATA_DIR}/gpt2-test-large/macocu_hr_en_v2_data.npy
+  weights:
+    - 0.47
+    - 0.47
+    - 0.06
   seq_len: ${..seq_len}
-  num_workers: 20
-  batch_size: 32
+  shuffle: false
+  num_workers: 10
+  batch_size: 40

@@ -49,7 +49,7 @@ early_stopping:
 wandb:
   enabled: true
   project: gpt2-test-large
-  name: jz-run
+  name: jz-lr-sweep-2
   log_freq: 2000 # how often gradients and weight histograms are logged
 
 trainer:
@@ -58,7 +58,7 @@ trainer:
   precision: 16-mixed
   devices: -1
   num_nodes: 1
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 7
   gradient_clip_val: 1.0
   strategy: auto
   log_every_n_steps: 100
@@ -79,7 +79,7 @@ train_dataset:
   seq_len: ${..seq_len}
   shuffle: false
   num_workers: 10
-  batch_size: 32
+  batch_size: 20
 
 
 val_dataset:

@@ -31,7 +31,6 @@ class TokenMixtureDataset(IterableDataset):
 if __name__ == "__main__":
     from tqdm import tqdm
 
-    from src.tokenizers import BPE
     from src.utils import paths
 
     ds = [
@@ -42,7 +41,7 @@ if __name__ == "__main__":
 
     dataset = TokenMixtureDataset(ds, weights, seq_len=2048000)
 
-    for i in tqdm(range(1000000)):
+    for _ in tqdm(range(1000000)):
         next(iter(dataset))
     # print(next(iter(dataset)))
     # tokenizer = BPE.BytePairEncoding.from_file(paths.EXPERIMENTS_DIR / "gpt2-test-large/BPE_vocab_48k_hr_en")
