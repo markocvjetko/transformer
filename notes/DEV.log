@@ -243,3 +243,92 @@ Question: should it be multi-process? Let's first try with a single thread that 
 
 Created measures for perplexity and Bits-per-Byte, its not so well structured though.
 
+
+11.10.2026.
+
+- npy files in /media/mcvjetko/marko
+- Ported the code to ADASTRA
+    - ./scripts/adastra_env.sh
+    - ./scripts/stream_to_adastra.sh
+- Modfied the new_submit.py to support ADASTRA
+- Started playing around with evaluations
+
+        My model (best arch from architecture-tests
+            COPA accuracy (sum):  238/400 = ~55.0%
+            COPA accuracy (mean): 242/400 = ~55.0%
+
+        GPT2 original performanc on COPA-EN
+            Evaluating openai-community/gpt2
+            COPA accuracy (sum):  238/400 = 59.5%
+            COPA accuracy (mean): 242/400 = 60.5%
+
+            Evaluating openai-community/gpt2-medium
+            COPA accuracy (sum):  263/400 = 65.8%
+            COPA accuracy (mean): 263/400 = 65.8%
+
+            Evaluating openai-community/gpt2-large
+            COPA accuracy (sum):  278/400 = 69.5%
+            COPA accuracy (mean): 279/400 = 69.8%
+
+            Evaluating openai-community/gpt2-xl
+            COPA accuracy (sum):  275/400 = 68.8%
+            COPA accuracy (mean): 272/400 = 68.0%
+
+        Follow up:
+        - i ran the best architecture with only fineweb dataset for training, everything else the same
+TODOS:
+- find more evals!
+- tokenizer to adastra?
+- fix data dir (raw, processed...)
+- figure out how to scale the architecture (depth, width?)
+    - figure out how to utilize the gpus (batch size, accum grad..)
+- figure out what new datasets to incorporate
+- figure out how to improve performance on the translation (i.e. make it be able to translate 
+multiple sentences, and also become better at translation). perthaps find bigger dataset.
+- fix data processing scripts in src/scripts/gpt2-test-large
+- write standardized eval script
+- clean notebooks
+- fix gits
+- bits per bytes bug?
+    codex says
+    - In metrics.py:27 (src/metrics/metrics.py:27), byte lengths are calculated as:
+            len(text.encode("utf-8"))
+            But your vocabulary stores one Unicode symbol per original byte. For example, Ġthe represents " the":
+            - Actual text: 4 bytes
+            - Current calculation: 5 bytes
+            That inflates the denominator, making bits-per-byte artificially low.
+            For your tokenizer, the correct calculation is:
+            token_lens = {idx: len(text) for text, idx in vocab.items()}
+        check last codex resume log
+- clean logs, reports, experimental log...
+- figure out how to disseminate
+- launch a larger parameter model on adastra, just for funs
+- move dataset to addastra with:
+
+        cd /media/mcvjetko/marko/transformer && printf '%s\n' \
+        experiments/gpt2-test-large/BPE_vocab_48k_hr_en \
+        data/gpt2-test-large/wikipedia_en/merged.npy \
+        data/gpt2-test-large/wikipedia_hr/merged.npy \
+        data/gpt2-test-large/macocu_hr_en_v2_data.npy \
+        data/gpt2-test-large/classla_hr_v2/merged.npy \
+        data/gpt2-test-large/merged_fineweb_data.npy \
+        | rsync -a --partial --info=progress2 --human-readable \
+            --files-from=- ./ adastra-agent:/lus/scratch/CT10/iso1996/mcvjetko/
+
+
+12.10.2026.
+
+- https://arxiv.org/pdf/2405.09250v1- resource of Croatian Serbian and Bosnian datasets
+- extra data for en-croatian https://opus.nlpl.eu/corpora-search/hr&en
+- downloaded classla v1
+- karpathy has a 100B version of fineweb edu
+
+
+15.10.2026.
+started refactorng generate script. check omega.py for the beginnings of that
+
+17.10.2026.
+
+Added classla v1 and dedupicated it 
+- scripts/deduplicate classla
+https://aclanthology.org/2024.emnlp-main.236 - to check whether including bosnian/serbian makes sense

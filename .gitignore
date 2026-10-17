@@ -65,4 +65,4 @@ Thumbs.db
 mutagen.yml.lock
 mutagen.yml
 slurm/rsync_data.sh
-*.log
+tea_debug.log
