@@ -360,7 +360,7 @@ DATA updates:
     - https://www.clarin.eu/resource-families/croatian-language-corpus-riznica-01
 - incorporating macocu-hr-en document-level parallel corpus (previously only sentence-level used)
     - https://www.clarin.si/repository/xmlui/handle/11356/1814
-
+    - downloaded, not parsed yet
 
 EVAL UPDATES:
 - first snippets to evaluate the model on BELEBELE.
