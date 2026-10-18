@@ -332,3 +332,42 @@ started refactorng generate script. check omega.py for the beginnings of that
 Added classla v1 and dedupicated it 
 - scripts/deduplicate classla
 https://aclanthology.org/2024.emnlp-main.236 - to check whether including bosnian/serbian makes sense
+
+
+complied pytorch low level MHA implementation rivals compiled flash-attention in some scenarios
+- pytorch recognizes the attention pattern and uses the appropriate kernel when compiled
+- doesnt work so well when compiling the full transformer model
+- TODO: benchmark mine vs pytorch native vs flash attention compiled and non compiled on MI250 gpus
+
+- TODO: figure out the evals
+- TODO: finish preprocessing datasets and push them to adastra
+    - increase english dataset size
+    - more en-hr parallel corpora
+- TODO: reorganize scripts/gpt2-test-large code
+
+- TODO: figure out precise set of experiments to do within next two weeks:
+    e.g.:
+        - sweep transformer depth/width for fixed amount of params
+    
+
+
+18.10.2026
+
+DATA updates:
+- very large croatian corpus 31B words, quality unclear https://hplt-project.org/datasets/v3.0
+
+- incorporating Riznica for high-quality literary croatian
+    - https://www.clarin.eu/resource-families/croatian-language-corpus-riznica-01
+- incorporating macocu-hr-en document-level parallel corpus (previously only sentence-level used)
+    - https://www.clarin.si/repository/xmlui/handle/11356/1814
+
+
+EVAL UPDATES:
+- first snippets to evaluate the model on BELEBELE.
+    - first investigations seem to show that the models are not working well when evaluated on the answer letter,
+    but seem to do above chance when needing to reproduce the whole correct answer
+- check PIQA, BALKAN BENCH  
+        - https://huggingface.co/datasets/permitt/superglue-hr   
+
+
+NEXT STEP - RUN ON ADASTRA!!
