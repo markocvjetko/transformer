@@ -178,7 +178,7 @@ class Config:
 
 
 # resolves ${paths:DATA_DIR} / ${paths:EXPERIMENTS_DIR} in yaml configs
-OmegaConf.register_new_resolver("paths", lambda name: str(getattr(paths, name)), replace=True)
+OmegaConf.register_resolver("paths", lambda name: str(getattr(paths, name)), replace=True)
 
 
 def load_config(config_path: str | None, cli_overrides: list[str] | None = None) -> Config:

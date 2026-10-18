@@ -3,20 +3,20 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import lightning as L
 import torch
-import wandb
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from omegaconf import II, OmegaConf
+from src.datasets.hrenwac_v2 import HrenWac
+from src.train.lit_transformer import LitTransformer
 from torch.utils.data import ConcatDataset, DataLoader
 
+import lightning as L
+import wandb
 from datasets import load_dataset
-from src.datasets.hrenwac_v2 import HrenWac
 from src.datasets.translation import TranslationDataset, collate_fn
 from src.models.transformer import LitGPT
 from src.tokenizers.BPE import BytePairEncoding
-from src.train.lit_transformer import LitTransformer
 from src.utils import paths
 
 

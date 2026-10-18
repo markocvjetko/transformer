@@ -197,7 +197,7 @@ class DecoderLM(nn.Module):
     ):
         super().__init__()
 
-        if ff_type != "swiglu" and ff_type != "gelu":
+        if ff_type not in {"swiglu", "gelu"}:
             raise ValueError("ff_type must be swiglu or gelu")
         if d_model % n_heads != 0:
             raise ValueError("n_heads must divide d_model")

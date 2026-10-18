@@ -53,9 +53,9 @@ class LitGPT(L.LightningModule):
         self.optim_kwargs = optim_kwargs
         self.lr_scheduler_name = lr_scheduler_name
         self.lr_scheduler_kwargs = lr_scheduler_kwargs
-        self.save_hyperparameters(ignore=["transformer"])
         self.bits_per_byte = bits_per_byte
         self.val_dataset_names = val_dataset_names
+        self.save_hyperparameters(ignore=["transformer", "bits_per_byte"])
 
     def training_step(self, batch, batch_idx):
         input_seq = batch[:, :-1]
@@ -85,32 +85,52 @@ class LitGPT(L.LightningModule):
 
         # if there is self.val_dataset_names print per dataset metrics, otherwise aggregated
         if self.val_dataset_names is not None and dataloader_idx is not None:
-            self.log(f"val_loss {self.val_dataset_names[dataloader_idx]}", loss, on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
-            self.log(f"val_bpb {self.val_dataset_names[dataloader_idx]}", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
+            self.log(
+                f"val_loss {self.val_dataset_names[dataloader_idx]}",
+                loss,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+                add_dataloader_idx=False,
+            )
+            self.log(
+                f"val_bpb {self.val_dataset_names[dataloader_idx]}",
+                bpb.mean(),
+                on_step=False,
+                on_epoch=True,
+                sync_dist=True,
+                add_dataloader_idx=False,
+            )
         else:
             self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
             self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
 
         return loss
 
-    def test_step(self, batch, batch_idx):  
+    def test_step(self, batch, batch_idx):
         pass
 
     def on_load_checkpoint(self, checkpoint):
         prefix = "transformer._orig_mod." if hasattr(self.transformer, "_orig_mod") else "transformer."
         checkpoint["state_dict"] = {
-            (prefix + key.removeprefix("transformer.").removeprefix("_orig_mod.")
-             if key.startswith("transformer.") else key): value
+            (
+                prefix + key.removeprefix("transformer.").removeprefix("_orig_mod.")
+                if key.startswith("transformer.")
+                else key
+            ): value
             for key, value in checkpoint["state_dict"].items()
         }
 
     def configure_optimizers(self):
         if self.optim_name == "adamw":
             params = [p for p in self.parameters() if p.requires_grad]
-            optimizer = optim.AdamW([
-                {"params": [p for p in params if p.ndim >= 2]},
-                {"params": [p for p in params if p.ndim < 2], "weight_decay": 0.0},
-            ], **self.optim_kwargs)
+            optimizer = optim.AdamW(
+                [
+                    {"params": [p for p in params if p.ndim >= 2]},
+                    {"params": [p for p in params if p.ndim < 2], "weight_decay": 0.0},
+                ],
+                **self.optim_kwargs,
+            )
         else:
             raise ValueError(f"Unsupported optimizer: {self.optim_name}")
 
