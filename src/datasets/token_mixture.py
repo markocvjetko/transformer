@@ -4,7 +4,8 @@ from torch.utils.data import IterableDataset
 
 class TokenMixtureDataset(IterableDataset):
     """
-    Takes preprocessed datasets (tokenized npy arrays), and samples them
+    Takes preprocessed datasets (tokenized npy arrays), and samples them.
+    Weights are normalized to 1
     """
 
     def __init__(self, datasets, weights, seq_len):
@@ -14,7 +15,8 @@ class TokenMixtureDataset(IterableDataset):
             data = np.load(dataset, mmap_mode="r")
             self.ds.append(data)
 
-        self.weights = weights
+        self.weights = np.array(weights, dtype=np.float64)
+        self.weights /= np.sum(self.weights)
         self.seq_len = seq_len
 
     def __iter__(self):

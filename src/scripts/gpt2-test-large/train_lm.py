@@ -154,7 +154,7 @@ class ValDatasetConfig:
         ]
     )
     names: list[str] = field(default_factory=lambda: ["wikipedia_hr", "wikipedia_en"])
-    seq_len: int = II("..seq_len")
+    seq_len: int = II("..seq_len")  
 
 
 @dataclass

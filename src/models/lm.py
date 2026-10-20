@@ -1,8 +1,22 @@
+"""
+TODO -
+"""
+
 import math
 
 import torch
 import torch.nn.functional as F
 from torch import nn
+
+"""
+generate(): no eval(), no trimming to seq_len, top_p ignored, no stop at EOS, breaks on right padding.
+Config: vocab_size is 48008 at the top level but 48006 in model.
+**kwargs: silently swallows typos in config keys.
+Missing checks: n_heads % gqa_factor, even head_dim, dq == dk == dv.
+RoPE in bf16: the tables get cast if the model is cast (mild); the angles break if the default dtype is bf16 (severe). Fix: compute in fp32 and keep the tables fp32.
+SDPA with left padding: rows with nothing to attend to may give NaN, depending on backend and version.
+Docstrings and comments: several shapes and descriptions are outdated.
+"""
 
 
 class SwishGatedLinearUnit(nn.Module):
@@ -24,8 +38,8 @@ class RotaryPositionalEmbedding(nn.Module):
         self.head_dim = head_dim
         self.seq_len = seq_len
 
-        token_pos = torch.arange(seq_len)
-        d_pairs = torch.arange(0, head_dim // 2)
+        token_pos = torch.arange(seq_len, dtype=torch.float32)
+        d_pairs = torch.arange(0, head_dim // 2, dtype=torch.float32)
         thetas = torch.pow(base, -2 * d_pairs / head_dim)
 
         cos_matrix = torch.cos(torch.outer(token_pos, thetas))
@@ -56,33 +70,137 @@ class RotaryPositionalEmbedding(nn.Module):
         return out
 
 
-class MultiHeadAttention(nn.Module):
+class TorchSelfAttention(nn.Module):
     """
     Scaled dot-product multi-head attention.
     """
 
-    def __init__(self, d_input, n_heads, dq, dk, dv, do, p_dropout, rope=None, use_bias=False):
+    def __init__(
+        self,
+        d_input,
+        dq,
+        dk,
+        dv,
+        do,
+        p_dropout,
+        n_heads,
+        use_gqa=False,
+        gqa_factor=4,
+        rope=None,
+        use_bias=False,
+    ):
         super().__init__()
         self.d_input = d_input
-        self.n_heads = n_heads
         self.dq = dq
         self.dk = dk  # these dims are placeholders
         self.dv = dv  # to check if all share the same dim
         self.do = do
-        self.dropout = nn.Dropout(p_dropout)
+        self.p_dropout = p_dropout
+        self.n_heads = n_heads
+        self.use_gqa = use_gqa
+        self.gqa_factor = gqa_factor
         self.rope = rope
         self.use_bias = use_bias
 
         self.W_Q = nn.Linear(d_input, dq, bias=use_bias)
-        self.W_K = nn.Linear(d_input, dk, bias=use_bias)
-        self.W_V = nn.Linear(d_input, dv, bias=use_bias)
+        if use_gqa:
+            self.W_K = nn.Linear(d_input, dk // gqa_factor, bias=use_bias)
+            self.W_V = nn.Linear(d_input, dv // gqa_factor, bias=use_bias)
+        else:
+            self.W_K = nn.Linear(d_input, dk, bias=use_bias)
+            self.W_V = nn.Linear(d_input, dv, bias=use_bias)
         self.W_O = nn.Linear(dv, do, bias=use_bias)  # Projects concatenated heads (dv) to output (do)
 
     def forward(self, Q, K, V, causal_mask=None, padding_mask=None):
 
         Q = self.W_Q(Q).view(Q.shape[0], Q.shape[1], self.n_heads, self.dq // self.n_heads)
-        K = self.W_K(K).view(K.shape[0], K.shape[1], self.n_heads, self.dk // self.n_heads)
-        V = self.W_V(V).view(V.shape[0], V.shape[1], self.n_heads, self.dv // self.n_heads)
+        if self.use_gqa:
+            K = self.W_K(K).view(K.shape[0], K.shape[1], self.n_heads // self.gqa_factor, self.dk // self.n_heads)
+            V = self.W_V(V).view(V.shape[0], V.shape[1], self.n_heads // self.gqa_factor, self.dv // self.n_heads)
+        else:
+            K = self.W_K(K).view(K.shape[0], K.shape[1], self.n_heads, self.dk // self.n_heads)
+            V = self.W_V(V).view(V.shape[0], V.shape[1], self.n_heads, self.dv // self.n_heads)
+
+        if self.rope is not None:
+            Q = self.rope(Q)
+            K = self.rope(K)
+
+        is_causal = causal_mask is not None and padding_mask is None
+        attn_mask = None
+        if padding_mask is not None:
+            attn_mask = ~padding_mask[:, None, None, :]
+            if causal_mask is not None:
+                attn_mask = attn_mask & ~causal_mask[: Q.shape[1], : Q.shape[1]]
+
+        Q = Q.transpose(1, 2)
+        K = K.transpose(1, 2)
+        V = V.transpose(1, 2)
+
+        # Apply causal mask (for decoder self-attention)
+        dropout_p = self.p_dropout if self.training else 0.0
+        attn_output = F.scaled_dot_product_attention(
+            Q, K, V, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=self.use_gqa
+        )
+
+        # Merge the 'n_heads' and 'head_dim' dimensions back into a single dimension after transposing
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.view(attn_output.size(0), attn_output.size(1), -1)
+
+        # Apply output projection
+        return self.W_O(attn_output)
+
+
+class MySelfAttention(nn.Module):
+    """
+    Scaled dot-product multi-head attention.
+    """
+
+    def __init__(
+        self,
+        d_input,
+        dq,
+        dk,
+        dv,
+        do,
+        p_dropout,
+        n_heads,
+        use_gqa=False,
+        gqa_factor=4,
+        rope=None,
+        use_bias=False,
+    ):
+        super().__init__()
+        self.d_input = d_input
+        self.dq = dq
+        self.dk = dk  # these dims are placeholders
+        self.dv = dv  # to check if all share the same dim
+        self.do = do
+        self.dropout = nn.Dropout(p=p_dropout)
+        self.n_heads = n_heads
+        self.use_gqa = use_gqa
+        self.gqa_factor = gqa_factor
+        self.rope = rope
+        self.use_bias = use_bias
+
+        self.W_Q = nn.Linear(d_input, dq, bias=use_bias)
+        if use_gqa:
+            self.W_K = nn.Linear(d_input, dk // gqa_factor, bias=use_bias)
+            self.W_V = nn.Linear(d_input, dv // gqa_factor, bias=use_bias)
+        else:
+            self.W_K = nn.Linear(d_input, dk, bias=use_bias)
+            self.W_V = nn.Linear(d_input, dv, bias=use_bias)
+
+        self.W_O = nn.Linear(dv, do, bias=use_bias)  # Projects concatenated heads (dv) to output (do)
+
+    def forward(self, Q, K, V, causal_mask=None, padding_mask=None):
+
+        Q = self.W_Q(Q).view(Q.shape[0], Q.shape[1], self.n_heads, self.dq // self.n_heads)
+        if self.use_gqa:
+            K = self.W_K(K).view(K.shape[0], K.shape[1], self.n_heads // self.gqa_factor, self.dk // self.n_heads)
+            V = self.W_V(V).view(V.shape[0], V.shape[1], self.n_heads // self.gqa_factor, self.dv // self.n_heads)
+        else:
+            K = self.W_K(K).view(K.shape[0], K.shape[1], self.n_heads, self.dk // self.n_heads)
+            V = self.W_V(V).view(V.shape[0], V.shape[1], self.n_heads, self.dv // self.n_heads)
 
         if self.rope is not None:
             Q = self.rope(Q)
@@ -92,21 +210,30 @@ class MultiHeadAttention(nn.Module):
         K = K.transpose(1, 2)
         V = V.transpose(1, 2)
 
+        if self.use_gqa:
+            K = K.repeat_interleave(self.gqa_factor, dim=1)
+            V = V.repeat_interleave(self.gqa_factor, dim=1)
+
         attn_score = torch.matmul(Q, K.transpose(-2, -1))
         attn_score /= math.sqrt(Q.shape[-1])
 
-        # Apply causal mask (for decoder self-attention)
+        L = attn_score.shape[-1]
+        mask = None
         if causal_mask is not None:
-            attn_score = attn_score.masked_fill(
-                causal_mask[: attn_score.shape[-1], : attn_score.shape[-1]], float("-inf")
-            )
-
-        # Apply key padding mask (to ignore padding tokens)
+            mask = causal_mask[:L, :L]  # (L, L)
         if padding_mask is not None:
-            # key_padding_mask: (batch, key_len) -> (batch, 1, 1, key_len)
-            attn_score = attn_score.masked_fill(padding_mask.unsqueeze(1).unsqueeze(2), float("-inf"))
+            pad = padding_mask[:, None, None, :]  # (B, 1, 1, L)
+            mask = pad if mask is None else mask | pad
+
+        if mask is not None:
+            attn_score = attn_score.masked_fill(mask, float("-inf"))
 
         attn_weights = torch.softmax(attn_score, dim=-1)
+        if mask is not None:
+            # A query that cannot see any key (e.g. left pad token, gets Nans).
+            # Line below sets the weights to 0, keeping the gradients clean
+            attn_weights = attn_weights.masked_fill(mask.all(dim=-1, keepdim=True), 0.0)
+
         attn_weights = self.dropout(attn_weights)
         attn_output = torch.matmul(attn_weights, V)
 
@@ -123,12 +250,15 @@ class DecoderBlock(nn.Module):
         self,
         d_model,
         d_ff,
-        n_heads,
         p_dropout,
+        n_heads,
+        use_gqa=False,
+        gqa_factor=4,
         rope=None,
         norm_type="rms",  # layer or rms
         ff_type="swiglu",  # swiglu or gelu
         use_bias=False,
+        use_torch_sdpa=False,
     ):
         super().__init__()
         self.d_model = d_model
@@ -144,7 +274,21 @@ class DecoderBlock(nn.Module):
         else:
             raise ValueError(f"Unknown norm_type: {norm_type}")
 
-        self.mha = MultiHeadAttention(d_model, n_heads, d_model, d_model, d_model, d_model, p_dropout, rope, use_bias)
+        attn_cls = TorchSelfAttention if use_torch_sdpa else MySelfAttention
+        self.mha = attn_cls(
+            d_input=d_model,
+            dq=d_model,
+            dk=d_model,
+            dv=d_model,
+            do=d_model,
+            p_dropout=p_dropout,
+            n_heads=n_heads,
+            use_gqa=use_gqa,
+            gqa_factor=gqa_factor,
+            rope=rope,
+            use_bias=use_bias,
+        )
+
         self.dropout = nn.Dropout(p=p_dropout)
 
         if ff_type == "gelu":
@@ -184,6 +328,8 @@ class DecoderLM(nn.Module):
         d_model=1024,
         d_ff=4096,
         n_heads=16,
+        use_gqa=False,
+        gqa_factor=2,
         N=24,
         pad_token_id=0,
         eos_token_id=2,
@@ -193,6 +339,7 @@ class DecoderLM(nn.Module):
         norm_type="rms",  # layer or rms
         ff_type="swiglu",  # gelu or swiglu
         use_bias=False,
+        use_torch_sdpa=False,
         **kwargs,
     ):
         super().__init__()
@@ -238,7 +385,22 @@ class DecoderLM(nn.Module):
             raise ValueError(f"Unknown pos_emb_type: {pos_emb_type}")
 
         self.decoders = nn.ModuleList(
-            [DecoderBlock(d_model, d_ff, n_heads, p_dropout, rope, norm_type, ff_type, use_bias) for _ in range(N)]
+            [
+                DecoderBlock(
+                    d_model=d_model,
+                    d_ff=d_ff,
+                    p_dropout=p_dropout,
+                    n_heads=n_heads,
+                    use_gqa=use_gqa,
+                    gqa_factor=gqa_factor,
+                    rope=rope,
+                    norm_type=norm_type,
+                    ff_type=ff_type,
+                    use_bias=use_bias,
+                    use_torch_sdpa=use_torch_sdpa,
+                )
+                for _ in range(N)
+            ]
         )
 
         if norm_type == "rms":
@@ -270,7 +432,7 @@ class DecoderLM(nn.Module):
             nn.init.ones_(module.weight)
             nn.init.zeros_(module.bias)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         """
         Args:
             x: torch.tensor, shape (B, N, vocab_size)
@@ -278,13 +440,8 @@ class DecoderLM(nn.Module):
             Where M, N are sequence lengths.
         Return:
             Tensor of shape (B, M, vocab_size)
-        #"""
-        # print("in forward")
-        # print(x.shape, y.shape)
+        """
 
-        padding_mask = x == self.pad_token_id
-
-        # while not y.shape[-1] >= self.seq_len:
         x = self.embedding_layer(x)
         if self.embedding_pos is not None:
             pos = torch.arange(0, x.shape[1], device=x.device).unsqueeze(0)
@@ -297,10 +454,10 @@ class DecoderLM(nn.Module):
         return self.ff_output(self.norm_final(decoder_output))
 
     def generate(self, x: torch.Tensor, temperature=1.0, seq_len=256, top_k=50, top_p=1.0):
-        # TODO: ADD top_p SUPPORT
+        # TODO: ADD top_p SUPPORT, place model in EVAL?
         with torch.no_grad():
             while x.shape[-1] < seq_len:
-                logits = self(x)[:, -1, :]
+                logits = self(x, padding_mask=x == self.pad_token_id)[:, -1, :]
                 logits /= temperature
                 probs = torch.softmax(logits, dim=-1)
                 top_k_vals, top_k_idx = torch.topk(probs, top_k, dim=-1)

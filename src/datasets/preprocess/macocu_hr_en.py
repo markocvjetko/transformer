@@ -4,6 +4,8 @@ from lxml import etree
 from tqdm import tqdm
 
 
+
+
 def parse_macocu_tmx(input_path, output_path):
 
     XML = "{http://www.w3.org/XML/1998/namespace}"

@@ -1,0 +1,5 @@
+file1: ${paths:DATA_DIR}/raw/corpus.hr
+file2: ${paths:DATA_DIR}/raw/corpus.en
+lang1: hr
+lang2: en
+output: ${paths:DATA_DIR}/raw/corpus.hr-en.jsonl

@@ -1,0 +1,27 @@
+import base64
+import csv
+
+from tqdm import tqdm
+
+from src.utils import paths
+
+# Increase the csv field size limit to avoid "_csv.Error: field larger than field limit"
+csv.field_size_limit(10**8)
+
+src = paths.DATA_DIR / "raw/macocu-hr-en-doc/MaCoCu-hr-en.doc.txt"
+dst = (paths.DATA_DIR / "interim/macocu-hr-en-doc" / "MaCoCu-hr-en.doc.decoded.txt")
+dst.parent.mkdir(parents=True, exist_ok=True)
+
+with (
+    open(src, "r", encoding="utf-8") as infile,
+    open(dst, "w", encoding="utf-8", newline="") as outfile,
+):
+    reader = csv.DictReader(infile, delimiter="\t")
+    writer = csv.writer(outfile, delimiter="\t")
+    writer.writerow(["croatian", "english"])
+
+    for row in tqdm(reader, desc="Decoding documents"):
+        croatian = base64.b64decode(row["src_doc"]).decode("utf-8")
+        english = base64.b64decode(row["trg_doc"]).decode("utf-8")
+
+        writer.writerow([croatian, english])

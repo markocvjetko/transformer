@@ -34,6 +34,7 @@ CLUSTER_PROFILES = {
             "slurm_account": "iso1996",
             "slurm_constraint": "MI250",
             "slurm_qos": None,
+            "nodes": 8,
             "gpus_per_node": 8,
             "tasks_per_node": 8,
             "cpus_per_task": 8,
@@ -47,7 +48,6 @@ CLUSTER_PROFILES = {
             "module load venv/0.8.0+torch2.11.0+rocm7.2.0",
             'source "$AI_VENV_PATH/bin/activate"',
             "export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1",
-            # Per-job MIOpen cache so ranks don't fight over one SQLite db.
             'export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-cache-${SLURM_JOB_ID}"',
             'export MIOPEN_CUSTOM_CACHE_DIR="$MIOPEN_USER_DB_PATH"',
         ],

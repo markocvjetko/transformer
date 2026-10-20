@@ -6,9 +6,9 @@ from src.utils import paths
 
 if __name__ == "__main__":
     # classla_v2 = paths.DATA_DIR / "raw/classla-web-hr-v2/CLASSLA-web.hr.2.0.jsonl"
-    src_path = paths.DATA_DIR / "raw/classla-web-hr-v1/MaCoCu-Genre.hr.jsonl"
-    dst_path = paths.DATA_DIR / "interim/classla-web-hr-v1/MaCoCu-Genre-DEDUPLICATED.hr.jsonl"
-    duplicates_path = paths.DATA_DIR / "raw/CLASSLA-web.hr.2.0.duplicates_with_CLASSLA-web.hr.1.0.json"
+    src_path = paths.DATA_DIR / "raw/classla-web-bs-v1/MaCoCu-Genre.bs.jsonl"
+    dst_path = paths.DATA_DIR / "interim/classla-web-bs-v1/MaCoCu-Genre-DEDUPLICATED.bs.jsonl"
+    duplicates_path = paths.DATA_DIR / "raw/classla-web-bs-v1/CLASSLA-web.bs.2.0.duplicates_with_CLASSLA-web.bs.1.0.json"
     
     with open(duplicates_path, "r") as file:
         dup_dict = json.load(file)

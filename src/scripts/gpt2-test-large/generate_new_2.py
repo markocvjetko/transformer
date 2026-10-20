@@ -35,7 +35,7 @@ def main():
     if not isinstance(prompt_ids, list) or len(prompt_ids) == 0:
         raise SystemExit("tokenizer produced an empty prompt")
     # prompt_ids = [hr_token_id] + prompt_ids + [en_token_id]
-    prompt_ids = [en_token_id] + prompt_ids + [hr_token_id]
+    prompt_ids = [hr_token_id] + prompt_ids
 
 
     gpt2 = DecoderLM(
@@ -63,11 +63,12 @@ def main():
     model = lit.transformer.to(args.device).eval()
 
     tokens = torch.tensor([prompt_ids], dtype=torch.long, device=args.device)
+    print(tokens.shape)
     with torch.no_grad():
         tokens = model.generate(
             tokens,
-            temperature=0.3,
-            seq_len=128,
+            temperature=0.8,
+            seq_len=256,
             top_k=100,
             top_p=0.9,
         )

@@ -5,6 +5,8 @@ import warnings
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from tqdm import tqdm
+
 from src.tokenizers import pretokenizers
 
 """
@@ -20,7 +22,7 @@ class BytePairEncoding:
         min_frequency=2,
         pretokenizer=pretokenizers.qwen38_pretokenizer,
         use_cache=True,
-        cache_size=1_000_000
+        cache_size=1_000_000,
     ):
 
         self.vocab_size = vocab_size
@@ -66,7 +68,7 @@ class BytePairEncoding:
         return merged
 
     def _tokenize_word(self, word):
-        
+
         if self.use_cache and word in self._cache:
             return self._cache[word]
 
@@ -93,7 +95,6 @@ class BytePairEncoding:
             self._cache[word] = tokens
             if len(self._cache) > self._cache_size:
                 self._cache.clear()
-
 
         return tokens
 
@@ -166,7 +167,7 @@ class BytePairEncoding:
 
         word_counts = Counter()
         with open(path, encoding="utf-8") as f:
-            for line in f:
+            for line in tqdm(f, desc="Counting words"):
                 word_counts.update([pretokenizers.byte_encode(pretoken) for pretoken in self.pretokenizer(line)])
         return word_counts
 
@@ -244,8 +245,8 @@ class BytePairEncoding:
                 w_count = pretoken_counts[word]
 
                 # only update pairs whose multiplicity actually changed
-                old_pairs = Counter(zip(old_tok, old_tok[1:], strict=True))
-                new_pairs = Counter(zip(new_tok, new_tok[1:], strict=True))
+                old_pairs = Counter(zip(old_tok, old_tok[1:]))
+                new_pairs = Counter(zip(new_tok, new_tok[1:]))
                 for p in old_pairs.keys() | new_pairs.keys():
                     delta = new_pairs[p] - old_pairs[p]
                     if delta:
@@ -259,7 +260,7 @@ class BytePairEncoding:
                 if token_b not in new_tok:
                     token_to_words[token_b].discard(word)
 
-            if (len(self._special_vocab) + len(self.vocab)) % 20 == 0:
+            if (len(self._special_vocab) + len(self.vocab)) % 1 == 0:
                 print(
                     f"Vocab size == {len(self._special_vocab) + len(self.vocab)}, \
                 last merge / count == {most_common_pair, -neg_count}"
@@ -292,7 +293,7 @@ class BytePairEncoding:
             vocab_size=data["vocab_size"],
             min_frequency=data["min_frequency"],
             use_cache=use_cache,
-            cache_size=cache_size
+            cache_size=cache_size,
         )
 
         tokenizer.vocab = data["vocab"]
