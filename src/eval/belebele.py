@@ -3,22 +3,31 @@ from dataclasses import dataclass
 
 import torch
 from omegaconf import OmegaConf
+from tqdm import tqdm
 
 from datasets import load_from_disk
 from src.lightning.lit_gpt import LitGPT
 from src.models.lm import DecoderLM
 from src.tokenizers.BPE import BytePairEncoding
 from src.utils import paths
+'''
+add param for logp normalization
 
+'''
 
 @dataclass
 class EvalConfig:
     train_config: str = str(
         paths.EXPERIMENTS_DIR
-        / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/config.resolved.yaml"
+        #/ "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/config.resolved.yaml"
+        #/ "best-gpt2-test-large/fineweb-only-20261012-ternary-reef/config.resolved.yaml"
+        / "best-gpt2-test-large/1024-dim-20M-token-20261012-delicious-electron/config.resolved.yaml"
     )
     model_path: str = str(
-        paths.EXPERIMENTS_DIR / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/last.ckpt"
+        paths.EXPERIMENTS_DIR
+        #/ "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/last.ckpt"
+        #/ "best-gpt2-test-large/fineweb-only-20261012-ternary-reef/lightning_logs/version_0/checkpoints/last.ckpt"
+        / "best-gpt2-test-large/1024-dim-20M-token-20261012-delicious-electron/last.ckpt"
     )
     tokenizer_path: str = str(paths.EXPERIMENTS_DIR / "gpt2-test-large/BPE_vocab_48k_hr_en")
     dataset_path: str = str(paths.DATA_DIR / "raw/belebele-hr")
@@ -33,82 +42,120 @@ def load_config(argv: list[str] | None = None):
     return cfg_eval, cfg_train
 
 
+def assemble_belebele_hr_sample(sample, tokenizer, mode: str = "letter"):
+    # mode letter or full, standardized to match the English version's logic and structure
+    question = (
+        f"{sample['flores_passage']}\n"
+        f"Pitanje: {sample['question']}\n"
+        # f"A: {sample['mc_answer1']}\n"
+        # f"B: {sample['mc_answer2']}\n"
+        # f"C: {sample['mc_answer3']}\n"
+        # f"D: {sample['mc_answer4']}\n"
+        "Odgovor:"
+    )
+    question = [tokenizer._special_vocab["<HR>"]] + tokenizer.tokenize(question, add_special=False)
+    if mode == "letter":
+        answers = [" A", " B", " C", " D"]
+        answers = [tokenizer.tokenize(answer, add_special=False)[0] for answer in answers]
+    elif mode == "full":
+        answers = [
+            tokenizer.tokenize(" " + sample["mc_answer1"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer2"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer3"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer4"], add_special=False),
+        ]
+        answers = [question + a for a in answers]
+    else:
+        raise ValueError(f"Unknown mode: {mode!r}")
+    correct = int(sample["correct_answer_num"]) - 1
+    return question, answers, correct
+
+
+def assemble_belebele_en_sample(sample, tokenizer, mode: str = "letter"):
+    # mode letter or full
+    question = (
+        f"{sample['flores_passage']}\n"
+        f"Question: {sample['question']}\n"
+        # f"A: {sample['mc_answer1']}\n"
+        # f"B: {sample['mc_answer2']}\n"
+        # f"C: {sample['mc_answer3']}\n"
+        # f"D: {sample['mc_answer4']}\n"
+        "Answer:"
+    )
+    question = [tokenizer._special_vocab["<EN>"]] + tokenizer.tokenize(question, add_special=False)
+    if mode == "letter":
+        answers = [" A", " B", " C", " D"]
+        answers = [tokenizer.tokenize(answer, add_special=False)[0] for answer in answers]
+    elif mode == "full":
+        answers = [
+            tokenizer.tokenize(" " + sample["mc_answer1"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer2"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer3"], add_special=False),
+            tokenizer.tokenize(" " + sample["mc_answer4"], add_special=False),
+        ]
+
+        answers = [question + a for a in answers]
+    else:
+        raise ValueError(f"Unknown mode: {mode!r}")
+    correct = int(sample["correct_answer_num"]) - 1
+    return question, answers, correct
+
+
+def eval_multiple_answer(
+    dataset,
+    model: torch.nn.Module,
+    tokenizer: BytePairEncoding,
+    mode="full",
+    assembler=assemble_belebele_hr_sample,
+):
+    # mode letter or full
+    device = next(model.parameters()).device
+    total_correct = 0
+
+    # for idx in range(len(dataset)):
+    with torch.no_grad():
+        for idx in tqdm(range(900), desc="Evaluating"):
+            question, answers, correct = assembler(dataset[idx], tokenizer, mode)
+            question = torch.tensor([question], dtype=torch.long, device=device)
+            answers = [torch.tensor(answer, dtype=torch.long, device=device) for answer in answers]
+
+            if mode == "letter":
+                logits = model.forward(question)
+                logits = logits[0, -1, :]
+                logits = logits[answers]
+                pred = logits.argmax().item()
+                if pred == correct:
+                    total_correct += 1
+
+            if mode == "full":
+                Q = question.shape[1]
+                scores = []
+                for answer in answers:
+                    logp = model(answer.unsqueeze(0))[0, Q - 1 : -1].log_softmax(-1)
+                    target = answer[Q:]
+                    scores.append(logp.gather(1, target[:, None]).sum())
+                pred = torch.tensor(scores).argmax().item()
+
+                if pred == correct:
+                    total_correct += 1
+
+        return total_correct / len(dataset)
+
+
 def main():
-    # Load configs
+    # Minimal placeholder for main; main2 contains the old procedure (to be deprecated)
     cfg_eval, cfg_train = load_config()
     tokenizer = BytePairEncoding.from_file(cfg_eval.tokenizer_path)
-
     transformer = DecoderLM(**cfg_train.model)
-
     lit = LitGPT.load_from_checkpoint(
         transformer=transformer, checkpoint_path=cfg_eval.model_path, map_location="cuda", weights_only=False
     )
-    lit.eval()
-
     model = lit.transformer.to(cfg_eval.device).eval()
-
     dataset = load_from_disk(cfg_eval.dataset_path)
-
-    # Verify the data works offline
-    # print("\n--- Offline Dataset Verification ---")
-    # print(dataset)
-    total_correct = 0
-    for idx in range(900):
-        # print("\nFirst sample text preview:")
-        # print(dataset["test"][idx])
-
-        text = (
-            dataset["test"][idx]["flores_passage"]
-            + "\n"
-            + "Pitanje: "
-            + dataset["test"][idx]["question"]
-            + "\n"
-            + "A: "
-            + dataset["test"][idx]["mc_answer1"]
-            + "\n"
-            + "B: "
-            + dataset["test"][idx]["mc_answer2"]
-            + "\n"
-            + "C: "
-            + dataset["test"][idx]["mc_answer3"]
-            + "\n"
-            + "D: "
-            + dataset["test"][idx]["mc_answer4"]
-            + "\n"
-            + "Odgovor:"
-        )
-        correct = dataset["test"][idx]["correct_answer_num"]
-        print("correct:", correct)
-        target_tokens = [
-            tokenizer.tokenize(" A", add_special=False)[0],
-            tokenizer.tokenize(" B", add_special=False)[0],
-            tokenizer.tokenize(" C", add_special=False)[0],
-            tokenizer.tokenize(" D", add_special=False)[0],
-        ]
-        print(target_tokens)
-
-        tokens = [tokenizer._special_vocab["<HR>"]] + tokenizer.tokenize(text)
-
-        # print(len(tokens))
-        tokens = torch.tensor([tokens], dtype=torch.long, device=cfg_eval.device)
-        with torch.no_grad():
-            tokens_new = model.forward(tokens)
-            # tokens_new = model.generate(
-            #     tokens,
-            #     temperature=0.8,
-            #     seq_len=170,
-            #     top_k=100,
-            #     top_p=0.9,
-            # )
-        log_probs = tokens_new[0, -1, :][target_tokens]
-        print(log_probs)
-        if log_probs.argmax().item() == (int(correct) - 1):
-            total_correct += 1
-    print(total_correct / 900)
-    # print(tokens_new)
-    # print(len(tokens_new[0]))
-    # full = tokenizer.decode(tokens_new[0].tolist(), add_special=True)
-    # print(full)
+    # The main evaluation/procedure is to be implemented or migrated from main2.
+    print("Loaded model, tokenizer, and dataset. Evaluation logic goes here.")
+    score = eval_multiple_answer(dataset["test"], model, tokenizer, mode="full")
+    print(score)
 
 
 if __name__ == "__main__":
