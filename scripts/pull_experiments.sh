@@ -3,14 +3,16 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 BATCH [RUN] [--cluster jz|adastra] [--checkpoints | --last-checkpoint]"
+    echo "Usage: $0 BATCH [RUN] [--cluster jz|adastra] [--checkpoints | --last-checkpoint] [--no-logs]"
     echo "  Cluster defaults to jz; --cluster=NAME also works."
     echo "  --last-checkpoint downloads only last.ckpt, for all runs if RUN is omitted."
     echo "  --last-experiment is an alias for --last-checkpoint."
+    echo "  --no-logs skips slurm .out/.err files."
 }
 
 names=()
 exclude_args=(--exclude='*.ckpt')
+log_args=()
 checkpoints=false
 last_checkpoint=false
 cluster=jz
@@ -28,6 +30,7 @@ while (( $# )); do
         --cluster=*) cluster="${1#*=}" ;;
         --checkpoints) checkpoints=true ;;
         --last-checkpoint|--last-experiment) last_checkpoint=true ;;
+        --no-logs) log_args=(--exclude='*.out' --exclude='*.err') ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
         *) names+=("$1") ;;
@@ -79,6 +82,6 @@ fi
 
 local_path="$project_root/experiments/$relative_path"
 mkdir -p -- "$local_path"
-rsync -avP --protect-args "${exclude_args[@]}" \
+rsync -avP --protect-args "${log_args[@]}" "${exclude_args[@]}" \
     "$remote_host:${remote_root%/}/$relative_path/" \
     "$local_path/"
