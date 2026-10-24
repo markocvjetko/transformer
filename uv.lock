@@ -4578,6 +4578,7 @@ dependencies = [
 dev = [
     { name = "docling" },
     { name = "ruff" },
+    { name = "transformers" },
 ]
 flash = [
     { name = "flash-attn" },
@@ -4604,6 +4605,7 @@ requires-dist = [
     { name = "tensorboard" },
     { name = "torch", specifier = "==2.8.0" },
     { name = "tqdm" },
+    { name = "transformers", marker = "extra == 'dev'" },
     { name = "translate-toolkit" },
     { name = "wandb" },
 ]
