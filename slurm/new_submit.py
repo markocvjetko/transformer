@@ -34,7 +34,8 @@ CLUSTER_PROFILES = {
             "slurm_account": "iso1996",
             "slurm_constraint": "MI250",
             "slurm_qos": None,
-            "nodes": 8,
+            "slurm_exclude": "g1046,g1100",
+            "nodes": 24,
             "gpus_per_node": 8,
             "tasks_per_node": 8,
             "cpus_per_task": 8,
@@ -50,6 +51,8 @@ CLUSTER_PROFILES = {
             "export HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1",
             'export MIOPEN_USER_DB_PATH="/tmp/${USER}-miopen-cache-${SLURM_JOB_ID}"',
             'export MIOPEN_CUSTOM_CACHE_DIR="$MIOPEN_USER_DB_PATH"',
+            # "export NCCL_DEBUG=INFO",
+            # "export NCCL_DEBUG_SUBSYS=INIT,NET",
         ],
     },
 }
@@ -64,6 +67,7 @@ class ClusterConfig:
     name: str = "transformer"  # --job-name        (generic)
     slurm_account: str = "imi@v100"  # --account imi@v100 imi@cpu
     # slurm_partition: str = ""  # --partition (uncomment/set as needed)
+    slurm_exclude: str | None = None  # --exclude, e.g. "g1046" or "g1046,g1100"
     slurm_constraint: str = "v100-32g"
     slurm_qos: str | None = "qos_gpu-t3"  # --qos   qos_gpu-t3 qos_cpu-dev
     nodes: int = 1
