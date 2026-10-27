@@ -111,7 +111,7 @@ class TorchSelfAttention(nn.Module):
             self.W_V = nn.Linear(d_input, dv, bias=use_bias)
         self.W_O = nn.Linear(dv, do, bias=use_bias)  # Projects concatenated heads (dv) to output (do)
 
-    def forward(self, Q, K, V, causal_mask=None, padding_mask=None):
+    def forward(self, Q, K, V, attn_mask=None):
 
         Q = self.W_Q(Q).view(Q.shape[0], Q.shape[1], self.n_heads, self.dq // self.n_heads)
         if self.use_gqa:
@@ -125,13 +125,6 @@ class TorchSelfAttention(nn.Module):
             Q = self.rope(Q)
             K = self.rope(K)
 
-        is_causal = causal_mask is not None and padding_mask is None
-        attn_mask = None
-        if padding_mask is not None:
-            attn_mask = ~padding_mask[:, None, None, :]
-            if causal_mask is not None:
-                attn_mask = attn_mask & ~causal_mask[: Q.shape[1], : Q.shape[1]]
-
         Q = Q.transpose(1, 2)
         K = K.transpose(1, 2)
         V = V.transpose(1, 2)
@@ -139,7 +132,13 @@ class TorchSelfAttention(nn.Module):
         # Apply causal mask (for decoder self-attention)
         dropout_p = self.p_dropout if self.training else 0.0
         attn_output = F.scaled_dot_product_attention(
-            Q, K, V, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=is_causal, enable_gqa=self.use_gqa
+            Q,
+            K,
+            V,
+            attn_mask=attn_mask,
+            is_causal=attn_mask is None,
+            dropout_p=dropout_p,
+            enable_gqa=self.use_gqa,
         )
 
         # Merge the 'n_heads' and 'head_dim' dimensions back into a single dimension after transposing
@@ -192,7 +191,7 @@ class MySelfAttention(nn.Module):
 
         self.W_O = nn.Linear(dv, do, bias=use_bias)  # Projects concatenated heads (dv) to output (do)
 
-    def forward(self, Q, K, V, causal_mask=None, padding_mask=None):
+    def forward(self, Q, K, V, attn_mask=None):
 
         Q = self.W_Q(Q).view(Q.shape[0], Q.shape[1], self.n_heads, self.dq // self.n_heads)
         if self.use_gqa:
@@ -218,21 +217,11 @@ class MySelfAttention(nn.Module):
         attn_score /= math.sqrt(Q.shape[-1])
 
         L = attn_score.shape[-1]
-        mask = None
-        if causal_mask is not None:
-            mask = causal_mask[:L, :L]  # (L, L)
-        if padding_mask is not None:
-            pad = padding_mask[:, None, None, :]  # (B, 1, 1, L)
-            mask = pad if mask is None else mask | pad
-
-        if mask is not None:
-            attn_score = attn_score.masked_fill(mask, float("-inf"))
-
+        if attn_mask is None:
+            attn_mask = torch.ones(L, L, dtype=torch.bool, device=attn_score.device).tril()
+        attn_score = attn_score.masked_fill(~attn_mask, float("-inf"))
         attn_weights = torch.softmax(attn_score, dim=-1)
-        if mask is not None:
-            # A query that cannot see any key (e.g. left pad token, gets Nans).
-            # Line below sets the weights to 0, keeping the gradients clean
-            attn_weights = attn_weights.masked_fill(mask.all(dim=-1, keepdim=True), 0.0)
+        attn_weights = attn_weights.masked_fill(~attn_mask.any(-1, keepdim=True), 0.0)
 
         attn_weights = self.dropout(attn_weights)
         attn_output = torch.matmul(attn_weights, V)
@@ -302,9 +291,9 @@ class DecoderBlock(nn.Module):
         else:
             raise ValueError(f"Unknown ff_type: {ff_type}")
 
-    def forward(self, x, causal_mask=None, padding_mask=None):
+    def forward(self, x, attn_mask=None):
         x_ln = self.norm_mha(x)
-        x = x + self.dropout(self.mha(x_ln, x_ln, x_ln, causal_mask, padding_mask))
+        x = x + self.dropout(self.mha(x_ln, x_ln, x_ln, attn_mask))
         x = x + self.dropout(self.ff(self.norm_ff(x)))
         return x
 
@@ -333,6 +322,7 @@ class DecoderLM(nn.Module):
         N=24,
         pad_token_id=0,
         eos_token_id=2,
+        intra_doc_mask=False,
         p_dropout=0.1,
         pos_emb_type="rope",  # rope or learned
         rope_base=10_000,
@@ -357,6 +347,7 @@ class DecoderLM(nn.Module):
         self.N = N
         self.pad_token_id = pad_token_id
         self.eos_token_id = eos_token_id
+        self.intra_doc_mask = intra_doc_mask
         self.p_dropout = p_dropout
         self.rope_base = rope_base
         self.norm_type = norm_type
@@ -432,16 +423,33 @@ class DecoderLM(nn.Module):
             nn.init.ones_(module.weight)
             nn.init.zeros_(module.bias)
 
-    def forward(self, x, padding_mask=None):
+    def _build_attn_mask(self, x, padding_mask):
+        if padding_mask is None and not self.intra_doc_mask:
+            return None
+        L = x.shape[1]
+        mask = ~self.causal_mask[:L, :L]  # (L, L)
+        if self.intra_doc_mask:
+            is_eos = x == self.eos_token_id
+            doc_ids = is_eos.cumsum(1) - is_eos.long()
+            mask = mask & (doc_ids[:, :, None] == doc_ids[:, None, :])  # (B, L, L)
+        if padding_mask is not None:
+            mask = mask & ~padding_mask[:, None, :]
+        return mask.expand(x.shape[0], L, L)[:, None]  # (B, 1, L, L)
+
+    def forward(self, x, padding_mask=None, return_hidden=False):
         """
         Args:
-            x: torch.tensor, shape (B, N, vocab_size)
+            x: torch.tensor, shape (B, N)
             y: torch.tensor, shape (B, M, vocab_size)
             Where M, N are sequence lengths.
         Return:
             Tensor of shape (B, M, vocab_size)
         """
 
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+
+        attn_mask = self._build_attn_mask(x, padding_mask)
         x = self.embedding_layer(x)
         if self.embedding_pos is not None:
             pos = torch.arange(0, x.shape[1], device=x.device).unsqueeze(0)
@@ -449,9 +457,12 @@ class DecoderLM(nn.Module):
 
         decoder_output = self.dropout(x)
         for decoder in self.decoders:
-            decoder_output = decoder(decoder_output, self.causal_mask, padding_mask)
+            decoder_output = decoder(decoder_output, attn_mask)
 
-        return self.ff_output(self.norm_final(decoder_output))
+        h = self.norm_final(decoder_output)
+        if return_hidden:
+            return h
+        return self.ff_output(h)
 
     def generate(self, x: torch.Tensor, temperature=1.0, seq_len=256, top_k=50, top_p=1.0):
         # TODO: ADD top_p SUPPORT, place model in EVAL?
