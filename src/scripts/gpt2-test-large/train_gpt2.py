@@ -6,7 +6,6 @@ from typing import Any
 
 import numpy as np
 import torch
-import wandb
 from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 from lightning.pytorch.profilers import PyTorchProfiler
@@ -15,8 +14,9 @@ from torch.profiler import ProfilerActivity, schedule
 from torch.utils.data import DataLoader
 
 import lightning as L
+import wandb
 from src.datasets.next_token import NextTokenPredictionDataset
-from src.datasets.token_mixture import TokenMixtureDataset
+from src.datasets.token_mixture import RandomAccessMixDataset
 from src.lightning.lit_gpt import LitGPT
 from src.metrics.metrics import BitsPerByte
 from src.models.gpt2 import GPT2
@@ -190,7 +190,7 @@ def main():
     cfg = load_config(yaml_path, cli_overrides)
     print(OmegaConf.to_yaml(cfg))  # log umjesto printa Logging python modul
 
-    ds_train = TokenMixtureDataset(cfg.train_dataset.paths, cfg.train_dataset.weights, cfg.train_dataset.seq_len)
+    ds_train = RandomAccessMixDataset(cfg.train_dataset.paths, cfg.train_dataset.weights, cfg.train_dataset.seq_len)
     ds_val = [NextTokenPredictionDataset(path, cfg.val_dataset.seq_len) for path in cfg.val_dataset.paths]
 
     def collate_fn(batch: np.array):

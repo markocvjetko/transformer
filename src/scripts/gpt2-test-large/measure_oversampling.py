@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.datasets.token_mixture import TokenMixtureDataset
+from src.datasets.token_mixture import RandomAccessMixDataset
 from src.utils import paths
 
 dataset_paths = [
@@ -28,4 +28,4 @@ for row in rows:
     print(f"{row[0]:35} | {row[1]:12,} | {row[2]:>12}")
 
 
-dataset = TokenMixtureDataset(dataset_paths, weights, seq_len)
+dataset = RandomAccessMixDataset(dataset_paths, weights, seq_len)
