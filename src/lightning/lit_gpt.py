@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
+from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
@@ -36,6 +39,10 @@ class Args:
     early_stopping_patience: int = 10
 
 
+def ce_loss(logits, y):
+    return F.cross_entropy(logits.view(-1, logits.size(-1)), y.reshape(-1), ignore_index=0)
+
+
 class LitGPT(L.LightningModule):
     def __init__(
         self,
@@ -46,6 +53,9 @@ class LitGPT(L.LightningModule):
         lr_scheduler_kwargs=None,
         bits_per_byte=None,
         val_dataset_names=None,
+        compile_loss=False,
+        compile_mode="default",
+        fused_ce=False,
     ):
         super().__init__()
         self.transformer = transformer
@@ -55,20 +65,33 @@ class LitGPT(L.LightningModule):
         self.lr_scheduler_kwargs = lr_scheduler_kwargs
         self.bits_per_byte = bits_per_byte
         self.val_dataset_names = val_dataset_names
+
+        self.compile_loss = compile_loss
+        self.fused_ce = fused_ce
+
+        if fused_ce:
+            self._flce = LigerFusedLinearCrossEntropyLoss(ignore_index=0)
+        else:
+            self._ce = torch.compile(ce_loss, mode=compile_mode) if compile_loss else ce_loss
+
         self.save_hyperparameters(ignore=["transformer", "bits_per_byte"])
 
     def training_step(self, batch, batch_idx):
-        input_seq = batch[:, :-1]
-        target_seq = batch[:, 1:]
+        x, y = batch[:, :-1], batch[:, 1:]
+        if self.fused_ce:
+            h = self.transformer(x, return_hidden=True)
+            loss = self._flce(self.transformer.ff_output.weight, h.reshape(-1, h.size(-1)), y.reshape(-1))
+        else:
+            loss = self._ce(self.transformer(x), y)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, sync_dist=False)
 
-        outputs = self.transformer(input_seq)
-
-        loss = nn.functional.cross_entropy(
-            input=outputs.view(-1, self.transformer.vocab_size), target=target_seq.reshape(-1), ignore_index=0
-        )
-
-        self.log("train_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
+
+    def configure_gradient_clipping(self, optimizer, gradient_clip_val=None, gradient_clip_algorithm=None):
+        # one pass: compute the global grad norm, clip, and log the pre-clip norm
+        max_norm = gradient_clip_val if gradient_clip_val is not None else float("inf")
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=max_norm, foreach=True)
+        self.log("grad_norm", grad_norm, on_step=True, on_epoch=False)
 
     def validation_step(self, batch, batch_idx, dataloader_idx=None):
         input_seq = batch[:, :-1]
@@ -90,7 +113,7 @@ class LitGPT(L.LightningModule):
                 loss,
                 on_step=False,
                 on_epoch=True,
-                sync_dist=True,
+                sync_dist=False,
                 add_dataloader_idx=False,
             )
             self.log(
@@ -98,12 +121,12 @@ class LitGPT(L.LightningModule):
                 bpb.mean(),
                 on_step=False,
                 on_epoch=True,
-                sync_dist=True,
+                sync_dist=False,
                 add_dataloader_idx=False,
             )
         else:
-            self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
-            self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=True, add_dataloader_idx=False)
+            self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=False, add_dataloader_idx=False)
+            self.log("val_bpb", bpb.mean(), on_step=False, on_epoch=True, sync_dist=False, add_dataloader_idx=False)
 
         return loss
 
@@ -120,6 +143,9 @@ class LitGPT(L.LightningModule):
             ): value
             for key, value in checkpoint["state_dict"].items()
         }
+
+    def on_after_batch_transfer(self, batch, dataloader_idx):
+        return batch.long()
 
     def configure_optimizers(self):
         if self.optim_name == "adamw":
@@ -206,10 +232,7 @@ if __name__ == "__main__":
             ModelCheckpoint(
                 dirpath=experiment_root,
                 save_last=True,
-            ),
-            # EarlyStopping(
-            #     monitor="val_loss", mode="min", patience=args.early_stopping_patience
-            # ),
+            )
         ],
         logger=[CSVLogger(save_dir=experiment_root)],
     )
