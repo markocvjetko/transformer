@@ -53,5 +53,13 @@ if ! command -v wandb >/dev/null 2>&1; then
 fi
 
 # Revisit previously synced runs after pulling newer logs from ongoing jobs.
-# Limit concurrent history uploads to reduce pressure on W&B during large syncs.
-"$wandb_command" sync -n 1 --include-synced "${runs[@]}"
+# Sync runs one at a time: a run pulled mid-write ends in a partial record,
+# and one unreadable run would otherwise abort the whole batch.
+failed=()
+for run in "${runs[@]}"; do
+    "$wandb_command" sync --include-synced "$run" || failed+=("$run")
+done
+if (( ${#failed[@]} > 0 )); then
+    echo "Incomplete sync for ${#failed[@]} run(s) (still running or killed mid-write; pull and sync again later):" >&2
+    printf '  %s\n' "${failed[@]}" >&2
+fi
