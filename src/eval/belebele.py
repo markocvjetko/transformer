@@ -13,14 +13,28 @@ from src.utils import paths
 
 @dataclass
 class EvalConfig:
-    train_config: str = str(
-        paths.EXPERIMENTS_DIR
-        / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/config.resolved.yaml"
-    )
-    model_path: str = str(
-        paths.EXPERIMENTS_DIR / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/last.ckpt"
-    )
-    tokenizer_path: str = str(paths.EXPERIMENTS_DIR / "gpt2-test-large/BPE_vocab_48k_hr_en")
+    # train_config: str = str(
+    #     paths.EXPERIMENTS_DIR
+    #     / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/config.resolved.yaml"
+    # )
+    # model_path: str = str(
+    #     paths.EXPERIMENTS_DIR / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/last.ckpt"
+    # )
+
+    # train_config: str = str(
+    #     paths.EXPERIMENTS_DIR
+    #     / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/config.resolved.yaml"
+    # )
+    # model_path: str = str(
+    #     paths.EXPERIMENTS_DIR / "architecture-tests/all-changes-lr-5e-4-20261005-amicable-tangerine/last.ckpt"
+    # )
+    train_config: str = str(paths.EXPERIMENTS_DIR / "1B-model/as-240B-20261025-breezy-sound/config.resolved.yaml")
+    model_path: str = str(paths.EXPERIMENTS_DIR / "1B-model/as-240B-20261025-breezy-sound/last.ckpt")
+    tokenizer_path: str = str(paths.EXPERIMENTS_DIR / "1B-model/hr_en_bs_tokenizer_48000")
+    # train_config: str = str(paths.EXPERIMENTS_DIR / "1B-model/test-2-20261021-acute-swimmer/config.resolved.yaml")
+    # model_path: str = str(paths.EXPERIMENTS_DIR / "1B-model/test-2-20261021-acute-swimmer/last.ckpt")
+    # tokenizer_path: str = str(paths.EXPERIMENTS_DIR / "1B-model/hr_en_bs_tokenizer_48000")
+
     dataset_path: str = str(paths.DATA_DIR / "raw/belebele-hr")
     device: str = "cuda"
 
@@ -38,14 +52,16 @@ def main():
     cfg_eval, cfg_train = load_config()
     tokenizer = BytePairEncoding.from_file(cfg_eval.tokenizer_path)
 
-    transformer = DecoderLM(**cfg_train.model)
-
-    lit = LitGPT.load_from_checkpoint(
-        transformer=transformer, checkpoint_path=cfg_eval.model_path, map_location="cuda", weights_only=False
-    )
-    lit.eval()
-
-    model = lit.transformer.to(cfg_eval.device).eval()
+    # model = DecoderLM(**cfg_train.model)
+    # lit = LitGPT.load_from_checkpoint(
+    #     transformer=model,
+    #     checkpoint_path=cfg_eval.model_path,
+    #     map_location="cpu",
+    #     weights_only=False,
+    #     strict=False,
+    # )
+    # model = lit.transformer.to(cfg_eval.device).eval()
+    # del lit
 
     dataset = load_from_disk(cfg_eval.dataset_path)
 
