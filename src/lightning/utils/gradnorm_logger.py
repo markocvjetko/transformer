@@ -1,19 +1,12 @@
 import subprocess
 
-import lightning as pl
+import torch
+
+import lightning as L
 
 
-class GitCallback(pl.Callback):
-    """
-    Saves a git hash once training starts. To load the saved commit, do "git checkout $(cat path/to/hash)"
-    To go back to the latest commit, "git pull origin branchname"
-    """
-
-    def __init__(self, experiment_root) -> None:
-        super().__init__()
-        self.experiment_root = experiment_root
-
-    def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-
-        with open(self.experiment_root / "git_hash", mode="w") as f:
-            f.write(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True))
+class GradNormLogger(L.Callback):
+    def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        grads = [p.grad for p in pl_module.parameters() if p.grad is not None]
+        norm = torch.linalg.vector_norm(torch.stack(torch._foreach_norm(grads)))
+        pl_module.log("grad_norm", norm)
